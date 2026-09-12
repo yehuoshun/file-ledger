@@ -1,6 +1,11 @@
 # 运行数据（台账）
 data/
+config.json
 *.tmp
+
+# 构建产物
+file-ledger
+file-ledger.exe
 
 # 前端依赖与构建产物
 node_modules/
