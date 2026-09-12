@@ -1,9 +1,8 @@
-// file-ledger 入口：配置加载 → 启动 HTTP 服务 → 打开浏览器
+// file-ledger 入口：配置加载 → 启动 HTTP 服务
 //
 // 开发计划步骤 1（空壳）：
 //   - HTTP 服务监听 127.0.0.1:18765
 //   - GET /api/registry 返回空台账数组
-//   - GET /healthz 存活探测
 //   - 首页（后续批次由内嵌前端接管，本步骤先给个占位页）
 package main
 
@@ -37,7 +36,6 @@ type Config struct {
 	DefaultDrive string `json:"default_drive"`
 	DataFile     string `json:"data_file"`
 	ThumbCache   string `json:"thumb_cache"`
-	OpenBrowser  bool   `json:"open_browser"`
 }
 
 // defaultConfig 配置默认值；config.json 不存在时生成
@@ -48,7 +46,6 @@ func defaultConfig() Config {
 		DefaultDrive: "Z:",
 		DataFile:     "data/registry.json",
 		ThumbCache:   "data/thumbs",
-		OpenBrowser:  true,
 	}
 }
 
@@ -92,11 +89,6 @@ func main() {
 		writeJSON(w, http.StatusOK, []Entry{})
 	})
 
-	// 存活探测：给前端/脚本判断后端是否在跑
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
-
 	// 首页占位（批次 1-3 结束后由 go:embed 内嵌前端替换）
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -105,11 +97,6 @@ func main() {
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	log.Printf("file-ledger 服务启动: http://%s", addr)
-
-	// 单实例复用：端口被占说明已有实例在跑，直接开浏览器指向它
-	if cfg.OpenBrowser {
-		go openBrowser(fmt.Sprintf("http://%s", addr))
-	}
 
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)
