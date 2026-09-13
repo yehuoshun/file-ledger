@@ -48,7 +48,14 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="描述" prop="note" min-width="120" show-overflow-tooltip />
+      <el-table-column label="标签" min-width="140">
+      <template #default="{ row }">
+        <el-tag v-for="t in row.tags" :key="t" size="small" class="tag-chip">{{ t }}</el-tag>
+        <span v-if="!row.tags?.length" class="muted">--</span>
+      </template>
+    </el-table-column>
+
+    <el-table-column label="描述" prop="note" min-width="120" show-overflow-tooltip />
 
       <el-table-column label="操作" width="100" fixed="right">
         <template #default>
@@ -72,6 +79,7 @@ const entries = [
     isDir: true,
     size: '1.2 GB',
     note: '项目文档',
+    tags: ['工作', '重要'],
     paths: [
       { type: 'local', path: 'D:\\docs' },
       { type: 'mount', path: 'Z:\\docs' },
@@ -83,6 +91,7 @@ const entries = [
     isDir: true,
     size: '128 GB',
     note: 'NAS 挂载',
+    tags: ['娱乐'],
     paths: [
       { type: 'mount', path: 'Z:' },
     ],
@@ -92,6 +101,7 @@ const entries = [
     isDir: false,
     size: '4 KB',
     note: '',
+    tags: [],
     paths: [
       { type: 'local', path: 'D:\\config.yaml' },
       { type: 'virtual', path: 'ali:config' },
@@ -108,7 +118,8 @@ const filtered = computed(() =>
       const q = search.value.toLowerCase()
       const matchName = e.alias.toLowerCase().includes(q)
       const matchNote = e.note.toLowerCase().includes(q)
-      if (!matchName && !matchNote) return false
+      const matchTags = (e.tags || []).some((t) => t.toLowerCase().includes(q))
+      if (!matchName && !matchNote && !matchTags) return false
     }
     if (dirFilter.value !== null && e.isDir !== dirFilter.value) return false
     return true
@@ -142,4 +153,8 @@ function handleAdd() {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.tag-chip {
+  margin-right: 4px;
+}
+.muted { color: var(--el-text-color-placeholder); }
 </style>
