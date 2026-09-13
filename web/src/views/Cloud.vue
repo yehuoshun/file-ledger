@@ -1,6 +1,17 @@
 <template>
   <div>
     <div class="toolbar">
+      <el-select v-model="typeFilter" placeholder="类型" clearable size="default" style="width: 110px">
+        <el-option value="local" label="本地" />
+        <el-option value="mount" label="挂载" />
+        <el-option value="virtual" label="虚拟" />
+      </el-select>
+
+      <el-select v-model="dirFilter" placeholder="类型" clearable size="default" style="width: 120px">
+        <el-option :value="true" label="文件夹" />
+        <el-option :value="false" label="文件" />
+      </el-select>
+
       <el-input
         v-model="search"
         placeholder="搜索名字…"
@@ -8,6 +19,7 @@
         size="default"
         class="search-input"
       />
+
       <el-button type="primary" size="default" @click="handleAdd">+ 新增</el-button>
     </div>
 
@@ -94,11 +106,16 @@ const entries = [
 ]
 
 const search = ref('')
+const typeFilter = ref<string | null>(null)
+const dirFilter = ref<boolean | null>(null)
 
 const filtered = computed(() =>
-  !search.value
-    ? entries
-    : entries.filter((e) => e.alias.toLowerCase().includes(search.value.toLowerCase()))
+  entries.filter((e) => {
+    if (search.value && !e.alias.toLowerCase().includes(search.value.toLowerCase())) return false
+    if (typeFilter.value && !e.paths.some((p) => p.type === typeFilter.value)) return false
+    if (dirFilter.value !== null && e.isDir !== dirFilter.value) return false
+    return true
+  })
 )
 
 function handleAdd() {
@@ -112,9 +129,10 @@ function handleAdd() {
   align-items: center;
   gap: 12px;
   margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 .search-input {
-  width: 240px;
+  width: 200px;
 }
 .path-tags {
   display: flex;
