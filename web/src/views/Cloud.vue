@@ -108,8 +108,7 @@ const filtered = computed(() =>
       const q = search.value.toLowerCase()
       const matchName = e.alias.toLowerCase().includes(q)
       const matchNote = e.note.toLowerCase().includes(q)
-      const matchPath = e.paths.some((p) => p.path.toLowerCase().includes(q))
-      if (!matchName && !matchNote && !matchPath) return false
+      if (!matchName && !matchNote) return false
     }
     if (dirFilter.value !== null && e.isDir !== dirFilter.value) return false
     return true
