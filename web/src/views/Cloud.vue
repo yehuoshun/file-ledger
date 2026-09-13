@@ -1,12 +1,6 @@
 <template>
   <div>
     <div class="toolbar">
-      <el-select v-model="typeFilter" placeholder="类型" clearable size="default" style="width: 110px">
-        <el-option value="local" label="本地" />
-        <el-option value="mount" label="挂载" />
-        <el-option value="virtual" label="虚拟" />
-      </el-select>
-
       <el-select v-model="dirFilter" placeholder="类型" clearable size="default" style="width: 120px">
         <el-option :value="true" label="文件夹" />
         <el-option :value="false" label="文件" />
@@ -106,7 +100,6 @@ const entries = [
 ]
 
 const search = ref('')
-const typeFilter = ref<string | null>(null)
 const dirFilter = ref<boolean | null>(null)
 
 const filtered = computed(() =>
