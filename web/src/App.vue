@@ -19,6 +19,10 @@
           </el-menu-item>
         </el-sub-menu>
 
+        <el-menu-item index="/cloud">
+          <el-icon><FolderOpened /></el-icon>
+          <span>虚拟网盘</span>
+        </el-menu-item>
         <el-menu-item index="/settings">
           <el-icon><Setting /></el-icon>
           <span>设置</span>
@@ -36,7 +40,7 @@
 
 <script setup lang="ts">
 import { useRoute } from 'vue-router'
-import { HomeFilled, Setting } from '@element-plus/icons-vue'
+import { HomeFilled, FolderOpened, Setting } from '@element-plus/icons-vue'
 
 const route = useRoute()
 </script>
