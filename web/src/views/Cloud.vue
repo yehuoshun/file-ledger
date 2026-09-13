@@ -112,7 +112,6 @@ const dirFilter = ref<boolean | null>(null)
 const filtered = computed(() =>
   entries.filter((e) => {
     if (search.value && !e.alias.toLowerCase().includes(search.value.toLowerCase())) return false
-    if (typeFilter.value && !e.paths.some((p) => p.type === typeFilter.value)) return false
     if (dirFilter.value !== null && e.isDir !== dirFilter.value) return false
     return true
   })
