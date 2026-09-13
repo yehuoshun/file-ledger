@@ -1,3 +1,3 @@
 <template>
-  <el-empty description="首页" />
+  <router-view />
 </template>
