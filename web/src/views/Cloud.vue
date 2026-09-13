@@ -79,20 +79,32 @@
           </el-radio-group>
         </el-form-item>
 
-        <el-form-item label="路径">
-          <div class="path-list">
-            <div v-for="(p, i) in form.paths" :key="i" class="path-row">
-              <el-select v-model="p.type" style="width: 100px">
-                <el-option value="local" label="本地" />
-                <el-option value="mount" label="挂载" />
-                <el-option value="virtual" label="虚拟" />
-              </el-select>
-              <el-input v-model="p.path" placeholder="D:\docs" style="flex: 1" />
-              <el-button v-if="form.paths.length > 1" link type="danger" @click="removePath(i)">×</el-button>
+        <template v-if="form.isDir">
+          <el-form-item label="路径" required>
+            <el-select v-model="form.dirType" style="width: 100px">
+              <el-option value="local" label="本地" />
+              <el-option value="mount" label="挂载" />
+              <el-option value="virtual" label="虚拟" />
+            </el-select>
+            <el-input v-model="form.dirPath" placeholder="D:\docs" style="width: 300px; margin-left: 8px" />
+          </el-form-item>
+        </template>
+        <template v-else>
+          <el-form-item label="路径">
+            <div class="path-list">
+              <div v-for="(p, i) in form.paths" :key="i" class="path-row">
+                <el-select v-model="p.type" style="width: 100px">
+                  <el-option value="local" label="本地" />
+                  <el-option value="mount" label="挂载" />
+                  <el-option value="virtual" label="虚拟" />
+                </el-select>
+                <el-input v-model="p.path" placeholder="D:\docs" style="flex: 1" />
+                <el-button v-if="form.paths.length > 1" link type="danger" @click="removePath(i)">×</el-button>
+              </div>
             </div>
-          </div>
-          <el-button text size="small" @click="addPath">+ 添加备份路径</el-button>
-        </el-form-item>
+            <el-button text size="small" @click="addPath">+ 添加备份路径</el-button>
+          </el-form-item>
+        </template>
 
         <el-form-item label="大小">
           <el-input v-model="form.size" placeholder="例如：1.2 GB" style="width: 200px" />
@@ -180,6 +192,8 @@ const form = reactive({
   note: '',
   tags: [] as string[],
   tagInput: '',
+  dirType: 'local' as const,
+  dirPath: '',
   paths: [{ type: 'local' as const, path: '' }],
 })
 
@@ -191,6 +205,8 @@ function resetForm() {
   form.tags = []
   form.tagInput = ''
   form.paths = [{ type: 'local', path: '' }]
+  form.dirType = 'local'
+  form.dirPath = ''
   editingId.value = null
 }
 
@@ -208,7 +224,12 @@ function openEdit(entry: any) {
   form.note = entry.note || ''
   form.tags = [...(entry.tags || [])]
   form.tagInput = ''
-  form.paths = entry.paths.map((p: any) => ({ type: p.type, path: p.path }))
+  if (entry.isDir) {
+    form.dirType = entry.paths[0]?.type || 'local'
+    form.dirPath = entry.paths[0]?.path || ''
+  } else {
+    form.paths = entry.paths.map((p: any) => ({ type: p.type, path: p.path }))
+  }
   dialogTitle.value = '编辑'
   dialogVisible.value = true
 }
@@ -233,8 +254,14 @@ function removeTag(i: number) {
 
 function handleSave() {
   if (!form.alias) { ElMessage.warning('名字不能为空'); return }
-  const validPaths = form.paths.filter((p) => p.path.trim())
-  if (!validPaths.length) { ElMessage.warning('至少填一条路径'); return }
+  let paths
+  if (form.isDir) {
+    if (!form.dirPath.trim()) { ElMessage.warning('路径不能为空'); return }
+    paths = [{ type: form.dirType, path: form.dirPath.trim() }]
+  } else {
+    paths = form.paths.filter((p) => p.path.trim())
+    if (!paths.length) { ElMessage.warning('至少填一条路径'); return }
+  }
 
   const entry = {
     alias: form.alias,
@@ -242,7 +269,7 @@ function handleSave() {
     size: form.size || '',
     note: form.note,
     tags: [...form.tags],
-    paths: validPaths.map((p) => ({ type: p.type, path: p.path })),
+    paths: paths.map((p: any) => ({ type: p.type, path: p.path })),
   }
 
   if (editingId.value) {
