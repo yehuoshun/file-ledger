@@ -8,7 +8,7 @@
 
       <el-input
         v-model="search"
-        placeholder="搜索名字…"
+        placeholder="搜索名字或描述…"
         clearable
         size="default"
         class="search-input"
@@ -104,7 +104,7 @@ const dirFilter = ref<boolean | null>(null)
 
 const filtered = computed(() =>
   entries.filter((e) => {
-    if (search.value && !e.alias.toLowerCase().includes(search.value.toLowerCase())) return false
+    if (search.value && !e.alias.toLowerCase().includes(search.value.toLowerCase()) && !e.note.toLowerCase().includes(search.value.toLowerCase())) return false
     if (dirFilter.value !== null && e.isDir !== dirFilter.value) return false
     return true
   })
