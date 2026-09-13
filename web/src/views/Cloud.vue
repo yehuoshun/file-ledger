@@ -50,7 +50,7 @@
 
       <el-table-column label="标签" min-width="140">
         <template #default="{ row }">
-          <el-tag v-for="t in row.tags" :key="t" size="small" class="tag-chip">{{ t }}</el-tag>
+          <span v-for="t in row.tags" :key="t" class="tag-chip colored" :style="tagChipStyle(t)">{{ t }}</span>
           <span v-if="!row.tags?.length" class="muted">--</span>
         </template>
       </el-table-column>
@@ -111,10 +111,7 @@
         </el-form-item>
 
         <el-form-item label="标签">
-          <el-input v-model="form.tagInput" placeholder="回车添加标签" @keydown.enter.prevent="addTag" />
-          <div v-if="form.tags.length" class="tag-list">
-            <el-tag v-for="(t, i) in form.tags" :key="i" closable size="small" @close="removeTag(i)">{{ t }}</el-tag>
-          </div>
+          <TagSelector v-model="form.tags" />
         </el-form-item>
 
         <el-form-item label="描述">
@@ -133,6 +130,21 @@
 <script setup lang="ts">
 import { ref, computed, reactive } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import TagSelector from '../components/TagSelector.vue'
+
+// 标签颜色共享（与 TagSelector 同步）
+const TAG_COLORS: Record<string, { bg: string; text: string }> = {
+  '工作': { bg: '#d4eaff', text: '#1565c0' },
+  '重要': { bg: '#e6d4f5', text: '#6a1b9a' },
+  '娱乐': { bg: '#f5e6d0', text: '#8a5a2a' },
+  '文档': { bg: '#d4eaff', text: '#1565c0' },
+  '项目': { bg: '#d4eaff', text: '#1565c0' },
+  '备份': { bg: '#fcedd4', text: '#8a6d2b' },
+}
+function tagChipStyle(t: string) {
+  const c = TAG_COLORS[t] || { bg: '#e8e8e8', text: '#555' }
+  return { background: c.bg, color: c.text }
+}
 
 const typeLabel: Record<string, string> = { local: '本地', mount: '挂载', virtual: '虚拟' }
 const tagType: Record<string, string> = { local: '', mount: 'warning', virtual: 'info' }
@@ -191,7 +203,6 @@ const form = reactive({
   size: '',
   note: '',
   tags: [] as string[],
-  tagInput: '',
   dirType: 'local' as const,
   dirPath: '',
   paths: [{ type: 'local' as const, path: '' }],
@@ -203,7 +214,6 @@ function resetForm() {
   form.size = ''
   form.note = ''
   form.tags = []
-  form.tagInput = ''
   form.paths = [{ type: 'local', path: '' }]
   form.dirType = 'local'
   form.dirPath = ''
@@ -223,7 +233,6 @@ function openEdit(entry: any) {
   form.size = entry.size || ''
   form.note = entry.note || ''
   form.tags = [...(entry.tags || [])]
-  form.tagInput = ''
   if (entry.isDir) {
     form.dirType = entry.paths[0]?.type || 'local'
     form.dirPath = entry.paths[0]?.path || ''
@@ -240,16 +249,6 @@ function addPath() {
 
 function removePath(i: number) {
   form.paths.splice(i, 1)
-}
-
-function addTag() {
-  const t = form.tagInput.trim()
-  if (t && !form.tags.includes(t)) form.tags.push(t)
-  form.tagInput = ''
-}
-
-function removeTag(i: number) {
-  form.tags.splice(i, 1)
 }
 
 function handleSave() {
@@ -303,7 +302,8 @@ async function handleDelete(row: any) {
 .search-input { width: 200px; }
 .path-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .path-tag { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tag-chip { margin-right: 4px; }
+.tag-chip { margin-right: 4px; display: inline-block; }
+.tag-chip.colored { padding: 1px 6px; border-radius: 3px; font-size: 12px; margin-right: 4px; }
 .muted { color: var(--el-text-color-placeholder); }
 
 .path-list { display: flex; flex-direction: column; gap: 8px; }
