@@ -1,47 +1,62 @@
 <template>
-  <el-table :data="entries" stripe style="width: 100%">
-    <el-table-column label="名字" prop="alias" min-width="120" />
+  <div>
+    <div class="toolbar">
+      <el-input
+        v-model="search"
+        placeholder="搜索名字…"
+        clearable
+        size="default"
+        class="search-input"
+      />
+      <el-button type="primary" size="default" @click="handleAdd">+ 新增</el-button>
+    </div>
 
-    <el-table-column label="路径" min-width="360">
-      <template #default="{ row }">
-        <div class="path-tags">
-          <el-tag
-            v-for="(p, i) in row.paths"
-            :key="i"
-            :type="tagType[p.type]"
-            size="small"
-            class="path-tag"
-          >
-            {{ typeLabel[p.type] }} {{ p.path }}
-          </el-tag>
-        </div>
-      </template>
-    </el-table-column>
+    <el-table :data="filtered" stripe style="width: 100%">
+      <el-table-column label="名字" prop="alias" min-width="120" />
 
-    <el-table-column label="文件夹" width="70" align="center">
-      <template #default="{ row }">
-        <span>{{ row.isDir ? '📁' : '📄' }}</span>
-      </template>
-    </el-table-column>
+      <el-table-column label="路径" min-width="360">
+        <template #default="{ row }">
+          <div class="path-tags">
+            <el-tag
+              v-for="(p, i) in row.paths"
+              :key="i"
+              :type="tagType[p.type]"
+              size="small"
+              class="path-tag"
+            >
+              {{ typeLabel[p.type] }} {{ p.path }}
+            </el-tag>
+          </div>
+        </template>
+      </el-table-column>
 
-    <el-table-column label="大小" width="90" align="right">
-      <template #default="{ row }">
-        <span>{{ row.size || '--' }}</span>
-      </template>
-    </el-table-column>
+      <el-table-column label="文件夹" width="70" align="center">
+        <template #default="{ row }">
+          <span>{{ row.isDir ? '📁' : '📄' }}</span>
+        </template>
+      </el-table-column>
 
-    <el-table-column label="描述" prop="note" min-width="120" show-overflow-tooltip />
+      <el-table-column label="大小" width="90" align="right">
+        <template #default="{ row }">
+          <span>{{ row.size || '--' }}</span>
+        </template>
+      </el-table-column>
 
-    <el-table-column label="操作" width="100" fixed="right">
-      <template #default>
-        <el-button link size="small">编辑</el-button>
-        <el-button link size="small" type="danger">删除</el-button>
-      </template>
-    </el-table-column>
-  </el-table>
+      <el-table-column label="描述" prop="note" min-width="120" show-overflow-tooltip />
+
+      <el-table-column label="操作" width="100" fixed="right">
+        <template #default>
+          <el-button link size="small">编辑</el-button>
+          <el-button link size="small" type="danger">删除</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+  </div>
 </template>
 
 <script setup lang="ts">
+import { ref, computed } from 'vue'
+
 const typeLabel: Record<string, string> = { local: '本地', mount: '挂载', virtual: '虚拟' }
 const tagType: Record<string, string> = { local: '', mount: 'warning', virtual: 'info' }
 
@@ -77,9 +92,30 @@ const entries = [
     ],
   },
 ]
+
+const search = ref('')
+
+const filtered = computed(() =>
+  !search.value
+    ? entries
+    : entries.filter((e) => e.alias.toLowerCase().includes(search.value.toLowerCase()))
+)
+
+function handleAdd() {
+  // 等后端就绪
+}
 </script>
 
 <style scoped>
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.search-input {
+  width: 240px;
+}
 .path-tags {
   display: flex;
   flex-wrap: wrap;
