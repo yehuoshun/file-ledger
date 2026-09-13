@@ -14,3 +14,6 @@ web/dist/
 # 系统文件
 .DS_Store
 Thumbs.db
+
+# NFS 锁文件残留
+.nfs*
