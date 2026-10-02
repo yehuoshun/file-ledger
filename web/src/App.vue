@@ -9,15 +9,10 @@
         router
         class="nav-menu"
       >
-        <el-sub-menu index="/home">
-          <template #title>
-            <el-icon><HomeFilled /></el-icon>
-            <span>首页</span>
-          </template>
-          <el-menu-item index="/home/dashboard">
-            仪表盘
-          </el-menu-item>
-        </el-sub-menu>
+        <el-menu-item index="/dashboard">
+          <el-icon><HomeFilled /></el-icon>
+          <span>仪表盘</span>
+        </el-menu-item>
 
         <el-menu-item index="/cloud">
           <el-icon><FolderOpened /></el-icon>

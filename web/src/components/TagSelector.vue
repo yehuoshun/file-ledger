@@ -6,7 +6,7 @@
         v-for="t in modelValue"
         :key="t"
         class="tag-chip"
-        :style="{ background: getColor(t).bg, color: getColor(t).text }"
+        :style="{ background: getTagColor(t).bg, color: getTagColor(t).text }"
       >
         {{ t }}
         <span class="tag-remove" @click.stop="remove(t)">×</span>
@@ -37,7 +37,7 @@
         :class="{ selected: modelValue.includes(t) }"
         @click="toggle(t)"
       >
-        <span class="tag-dot" :style="{ background: getColor(t).bg }"></span>
+        <span class="tag-dot" :style="{ background: getTagColor(t).bg }"></span>
         {{ t }}
         <span v-if="modelValue.includes(t)" class="check">✓</span>
       </div>
@@ -48,6 +48,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { tagPool, getTagColor } from '../constants/tags'
 
 const props = defineProps<{ modelValue: string[] }>()
 const emit = defineEmits<{ 'update:modelValue': [v: string[]] }>()
@@ -56,35 +57,8 @@ const open = ref(false)
 const q = ref('')
 const inputRef = ref<HTMLInputElement>()
 
-// ── tag pool（共享，模拟后端搜索）──
-const COLORS = [
-  { bg: '#e8e8e8', text: '#555' },
-  { bg: '#f5e6d0', text: '#8a5a2a' },
-  { bg: '#fae3c8', text: '#b35d0a' },
-  { bg: '#fcedd4', text: '#8a6d2b' },
-  { bg: '#d9f0d9', text: '#2e7d32' },
-  { bg: '#d4eaff', text: '#1565c0' },
-  { bg: '#e6d4f5', text: '#6a1b9a' },
-  { bg: '#fce4ec', text: '#c2185b' },
-  { bg: '#fee2e2', text: '#b71c1c' },
-]
-
-const tagColorMap = ref<Record<string, number>>({
-  '工作': 0, '重要': 5, '娱乐': 1, '文档': 5, '备份': 3, '项目': 5,
-})
-
-let colorIdx = Object.keys(tagColorMap.value).length % COLORS.length
-
-function getColor(name: string) {
-  if (!(name in tagColorMap.value)) {
-    tagColorMap.value[name] = colorIdx
-    colorIdx = (colorIdx + 1) % COLORS.length
-  }
-  return COLORS[tagColorMap.value[name]]
-}
-
-// 所有标签（模拟后端池）
-const allTags = computed(() => Object.keys(tagColorMap.value).sort())
+// 所有标签（模拟后端池，来自共享 tagPool）
+const allTags = computed(() => [...tagPool.value].sort())
 
 const filteredTags = computed(() => {
   if (!q.value) return allTags.value

@@ -13,16 +13,8 @@
         <span class="form-hint">mount 类型默认盘符</span>
       </el-form-item>
 
-      <el-form-item label="数据文件">
-        <span class="form-hint">data/registry.json</span>
-      </el-form-item>
-
-      <el-form-item label="主题模式">
-        <el-radio-group v-model="form.theme">
-          <el-radio value="light">浅色</el-radio>
-          <el-radio value="dark">暗色</el-radio>
-          <el-radio value="auto">跟随系统</el-radio>
-        </el-radio-group>
+      <el-form-item label="数据库">
+        <span class="form-hint">PostgreSQL 127.0.0.1:5432/file_ledger（后端就绪后展示/可改）</span>
       </el-form-item>
 
       <el-form-item>
@@ -39,7 +31,6 @@ import { ref } from 'vue'
 const form = ref({
   port: '18765',
   defaultDrive: 'Z:',
-  theme: 'light',
 })
 </script>
 

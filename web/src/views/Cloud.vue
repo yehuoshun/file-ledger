@@ -26,11 +26,11 @@
             <el-tag
               v-for="(p, i) in row.paths"
               :key="i"
-              :type="tagType[p.type]"
+              :type="PATH_TYPE_TAG[p.type]"
               size="small"
               class="path-tag"
             >
-              {{ typeLabel[p.type] }} {{ p.path }}
+              {{ PATH_TYPE_LABEL[p.type] }} {{ p.path }}
             </el-tag>
           </div>
         </template>
@@ -50,7 +50,7 @@
 
       <el-table-column label="标签" min-width="140">
         <template #default="{ row }">
-          <span v-for="t in row.tags" :key="t" class="tag-chip colored" :style="tagChipStyle(t)">{{ t }}</span>
+          <span v-for="t in row.tags" :key="t" class="tag-chip colored" :style="getTagColor(t)">{{ t }}</span>
           <span v-if="!row.tags?.length" class="muted">--</span>
         </template>
       </el-table-column>
@@ -82,9 +82,7 @@
         <template v-if="form.isDir">
           <el-form-item label="路径" required>
             <el-select v-model="form.dirType" style="width: 100px">
-              <el-option value="local" label="本地" />
-              <el-option value="mount" label="挂载" />
-              <el-option value="virtual" label="虚拟" />
+              <el-option v-for="o in PATH_TYPE_OPTIONS" :key="o.value" :value="o.value" :label="o.label" />
             </el-select>
             <el-input v-model="form.dirPath" placeholder="D:\docs" style="width: 300px; margin-left: 8px" />
           </el-form-item>
@@ -94,9 +92,7 @@
             <div class="path-list">
               <div v-for="(p, i) in form.paths" :key="i" class="path-row">
                 <el-select v-model="p.type" style="width: 100px">
-                  <el-option value="local" label="本地" />
-                  <el-option value="mount" label="挂载" />
-                  <el-option value="virtual" label="虚拟" />
+                  <el-option v-for="o in PATH_TYPE_OPTIONS" :key="o.value" :value="o.value" :label="o.label" />
                 </el-select>
                 <el-input v-model="p.path" placeholder="D:\docs" style="flex: 1" />
                 <el-button v-if="form.paths.length > 1" link type="danger" @click="removePath(i)">×</el-button>
@@ -131,28 +127,13 @@
 import { ref, computed, reactive } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import TagSelector from '../components/TagSelector.vue'
+import { getTagColor } from '../constants/tags'
+import { PATH_TYPE_LABEL, PATH_TYPE_TAG, PATH_TYPE_OPTIONS } from '../constants/pathTypes'
 
-// 标签颜色共享（与 TagSelector 同步）
-const TAG_COLORS: Record<string, { bg: string; text: string }> = {
-  '工作': { bg: '#d4eaff', text: '#1565c0' },
-  '重要': { bg: '#e6d4f5', text: '#6a1b9a' },
-  '娱乐': { bg: '#f5e6d0', text: '#8a5a2a' },
-  '文档': { bg: '#d4eaff', text: '#1565c0' },
-  '项目': { bg: '#d4eaff', text: '#1565c0' },
-  '备份': { bg: '#fcedd4', text: '#8a6d2b' },
-}
-function tagChipStyle(t: string) {
-  const c = TAG_COLORS[t] || { bg: '#e8e8e8', text: '#555' }
-  return { background: c.bg, color: c.text }
-}
-
-const typeLabel: Record<string, string> = { local: '本地', mount: '挂载', virtual: '虚拟' }
-const tagType: Record<string, string> = { local: '', mount: 'warning', virtual: 'info' }
-
-// mock data
+// mock data（id 必填：删除/编辑依赖 id，缺失会导致删除清空全部、编辑变新增）
 const entries = ref<any[]>([
   {
-    alias: '文档', isDir: true, size: '1.2 GB', note: '项目文档', tags: ['工作', '重要'],
+    id: '1', alias: '文档', isDir: true, size: '1.2 GB', note: '项目文档', tags: ['工作', '重要'],
     paths: [
       { type: 'local', path: 'D:\\docs' },
       { type: 'mount', path: 'Z:\\docs' },
@@ -160,11 +141,11 @@ const entries = ref<any[]>([
     ],
   },
   {
-    alias: '游戏盘', isDir: true, size: '128 GB', note: 'NAS 挂载', tags: ['娱乐'],
+    id: '2', alias: '游戏盘', isDir: true, size: '128 GB', note: 'NAS 挂载', tags: ['娱乐'],
     paths: [{ type: 'mount', path: 'Z:' }],
   },
   {
-    alias: 'config.yaml', isDir: false, size: '4 KB', note: '', tags: [],
+    id: '3', alias: 'config.yaml', isDir: false, size: '4 KB', note: '', tags: [],
     paths: [
       { type: 'local', path: 'D:\\config.yaml' },
       { type: 'virtual', path: 'ali:config' },
@@ -172,7 +153,7 @@ const entries = ref<any[]>([
   },
 ])
 
-let nextId = 100
+let nextId = 4
 
 // ── search / filter ──
 const search = ref('')
@@ -184,7 +165,7 @@ const filtered = computed(() =>
     if (search.value) {
       const q = search.value.toLowerCase()
       const matchName = e.alias.toLowerCase().includes(q)
-      const matchNote = e.note.toLowerCase().includes(q)
+      const matchNote = (e.note || '').toLowerCase().includes(q)
       const matchTags = (e.tags || []).some((t: string) => t.toLowerCase().includes(q))
       if (!matchName && !matchNote && !matchTags) return false
     }

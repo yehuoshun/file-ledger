@@ -12,12 +12,11 @@ import (
 	"path/filepath"
 )
 
-// Config 运行配置
+// Config 运行配置（与 doc/03-架构设计.md config 表对齐；存储已定 PostgreSQL，去掉 JSON 时代残留的 data_file）
 type Config struct {
 	Host         string `json:"host"`
 	Port         int    `json:"port"`
 	DefaultDrive string `json:"default_drive"`
-	DataFile     string `json:"data_file"`
 	ThumbCache   string `json:"thumb_cache"`
 }
 
@@ -26,7 +25,6 @@ func defaultConfig() Config {
 		Host:         "127.0.0.1",
 		Port:         18765,
 		DefaultDrive: "Z:",
-		DataFile:     "data/registry.json",
 		ThumbCache:   "data/thumbs",
 	}
 }
