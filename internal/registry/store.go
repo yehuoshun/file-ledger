@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -24,14 +25,19 @@ const entryCols = "id, alias, parent_id, is_dir, size, note, tags, paths, create
 // scanEntry 把查询行扫成 Entry
 func scanEntry(row pgx.Row) (*Entry, error) {
 	var (
-		e        Entry
-		tagsRaw  []byte
-		pathsRaw []byte
+		e         Entry
+		tagsRaw   []byte
+		pathsRaw  []byte
+		createdAt time.Time
+		updatedAt time.Time
 	)
 	if err := row.Scan(&e.ID, &e.Alias, &e.ParentID, &e.IsDir, &e.Size, &e.Note,
-		&tagsRaw, &pathsRaw, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		&tagsRaw, &pathsRaw, &createdAt, &updatedAt); err != nil {
 		return nil, err
 	}
+	// timestamptz 二进制协议必须扫进 time.Time，再转字符串输出
+	e.CreatedAt = createdAt.Format(time.RFC3339)
+	e.UpdatedAt = updatedAt.Format(time.RFC3339)
 	if err := json.Unmarshal(tagsRaw, &e.Tags); err != nil {
 		return nil, fmt.Errorf("解析 tags 失败: %w", err)
 	}
