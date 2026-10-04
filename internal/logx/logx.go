@@ -75,7 +75,9 @@ func SetLevel(l Level) {
 	minLevel = l
 }
 
-// Logger 带模块名的日志器
+// Logger 带模块名的日志器。
+// 用法：logx.New("api").Info("registry.create", "rid", rid, "alias", alias, "err", err)
+// 键值对必须成对；单独出现的 error 值自动转为 err=xxx。
 type Logger struct {
 	module string
 }
@@ -85,12 +87,16 @@ func New(module string) *Logger {
 	return &Logger{module: module}
 }
 
-// Debug/Info/Warn/Error 各级别输出。
-// 用法：logx.New("api").Info("registry.create", "rid", rid, "alias", alias, "err", err)
-// 键值对必须成对；单独出现的 error 值自动转为 err=xxx。
+// Debug 输出 DEBUG 级别日志。
 func (l *Logger) Debug(msg string, kv ...any) { l.log(LevelDebug, msg, kv...) }
-func (l *Logger) Info(msg string, kv ...any)  { l.log(LevelInfo, msg, kv...) }
-func (l *Logger) Warn(msg string, kv ...any)  { l.log(LevelWarn, msg, kv...) }
+
+// Info 输出 INFO 级别日志。
+func (l *Logger) Info(msg string, kv ...any) { l.log(LevelInfo, msg, kv...) }
+
+// Warn 输出 WARN 级别日志。
+func (l *Logger) Warn(msg string, kv ...any) { l.log(LevelWarn, msg, kv...) }
+
+// Error 输出 ERROR 级别日志。
 func (l *Logger) Error(msg string, kv ...any) { l.log(LevelError, msg, kv...) }
 
 func (l *Logger) log(lv Level, msg string, kv ...any) {
