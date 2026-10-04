@@ -27,7 +27,7 @@ func firstAsset(t *testing.T) string {
 }
 
 func TestSPAHandler(t *testing.T) {
-	h := spaHandler()
+	h := SPAHandler()
 
 	cases := []struct {
 		name       string

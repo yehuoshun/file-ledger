@@ -1,26 +1,28 @@
-package registry
+package test
 
 import (
 	"strings"
 	"testing"
+
+	"file-ledger/internal/registry"
 )
 
 func TestValidate(t *testing.T) {
 	cases := []struct {
 		name string
-		e    Entry
+		e    registry.Entry
 		want string // 期望错误子串；空 = 期望通过
 	}{
-		{"合法多路径", Entry{Alias: " 文档 ", Paths: []Path{
+		{"合法多路径", registry.Entry{Alias: " 文档 ", Paths: []registry.Path{
 			{Type: "local", Path: " D:\\docs "},
 			{Type: "virtual", Path: "ali:docs"},
 		}}, ""},
-		{"别名空白", Entry{Alias: "  ", Paths: []Path{{Type: "local", Path: "D:\\x"}}}, "别名"},
-		{"文件无路径", Entry{Alias: "x", Paths: nil}, "至少"},
-		{"虚拟文件夹无路径", Entry{Alias: "游戏", IsDir: true, Paths: nil}, ""},
-		{"类型非法", Entry{Alias: "x", Paths: []Path{{Type: "ftp", Path: "D:\\x"}}}, "类型非法"},
-		{"路径空白", Entry{Alias: "x", Paths: []Path{{Type: "local", Path: " "}}}, "不能为空"},
-		{"挂载类型合法", Entry{Alias: "x", Paths: []Path{{Type: "mount", Path: "Z:"}}}, ""},
+		{"别名空白", registry.Entry{Alias: "  ", Paths: []registry.Path{{Type: "local", Path: "D:\\x"}}}, "别名"},
+		{"文件无路径", registry.Entry{Alias: "x", Paths: nil}, "至少"},
+		{"虚拟文件夹无路径", registry.Entry{Alias: "游戏", IsDir: true, Paths: nil}, ""},
+		{"类型非法", registry.Entry{Alias: "x", Paths: []registry.Path{{Type: "ftp", Path: "D:\\x"}}}, "类型非法"},
+		{"路径空白", registry.Entry{Alias: "x", Paths: []registry.Path{{Type: "local", Path: " "}}}, "不能为空"},
+		{"挂载类型合法", registry.Entry{Alias: "x", Paths: []registry.Path{{Type: "mount", Path: "Z:"}}}, ""},
 	}
 
 	for _, c := range cases {
@@ -43,7 +45,7 @@ func TestValidate(t *testing.T) {
 }
 
 func TestValidateTrims(t *testing.T) {
-	e := Entry{Alias: "  文档  ", Paths: []Path{{Type: " local ", Path: " D:\\docs "}}}
+	e := registry.Entry{Alias: "  文档  ", Paths: []registry.Path{{Type: " local ", Path: " D:\\docs "}}}
 	if err := e.Validate(); err != nil {
 		t.Fatalf("Validate 失败: %v", err)
 	}
