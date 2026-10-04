@@ -25,7 +25,11 @@ func EnsureDatabase(ctx context.Context, adminConnString, dbname string) error {
 	if err != nil {
 		return fmt.Errorf("连接 admin 库失败: %w", err)
 	}
-	defer conn.Close(ctx)
+	defer func() {
+		if err := conn.Close(ctx); err != nil {
+			dlog.Warn("conn.close", "err", err)
+		}
+	}()
 
 	var exists bool
 	if err := conn.QueryRow(ctx,

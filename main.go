@@ -112,7 +112,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("连接数据库 %s 失败: %v", cfg.Database.DBName, err)
 	}
-	defer conn.Close(ctx)
+	defer func() {
+		if err := conn.Close(ctx); err != nil {
+			logx.New("main").Warn("conn.close", "err", err)
+		}
+	}()
 	if err := db.EnsureSchema(ctx, conn); err != nil {
 		log.Fatalf("表结构初始化失败: %v", err)
 	}
