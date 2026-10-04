@@ -100,8 +100,8 @@ func (l *Logger) log(lv Level, msg string, kv ...any) {
 		return
 	}
 	var b strings.Builder
-	_, _ = b.WriteString(time.Now().Format("2006-01-02 15:04:05.000"))
-	_, _ = b.WriteString(fmt.Sprintf(" [%s] %-10s %s", lv, l.module, msg))
+	write(&b, time.Now().Format("2006-01-02 15:04:05.000"))
+	write(&b, fmt.Sprintf(" [%s] %-10s %s", lv, l.module, msg))
 	for i := 0; i < len(kv); i++ {
 		key := fmt.Sprintf("%v", kv[i])
 		var val any = "?"
@@ -112,11 +112,16 @@ func (l *Logger) log(lv Level, msg string, kv ...any) {
 		if err, ok := val.(error); ok && err != nil {
 			val = err.Error()
 		}
-		_, _ = b.WriteString(" ")
-		_, _ = b.WriteString(key)
-		_, _ = b.WriteString("=")
-		_, _ = b.WriteString(fmt.Sprintf("%v", val))
+		write(&b, " ")
+		write(&b, key)
+		write(&b, "=")
+		write(&b, fmt.Sprintf("%v", val))
 	}
-	_, _ = b.WriteString("\n")
+	write(&b, "\n")
 	_, _ = io.WriteString(out, b.String())
+}
+
+// write strings.Builder 写入封装：Builder 写入永不返回错误（签名如此），统一在此忽略
+func write(b *strings.Builder, s string) {
+	_, _ = b.WriteString(s)
 }

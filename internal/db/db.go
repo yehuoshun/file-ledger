@@ -25,11 +25,7 @@ func EnsureDatabase(ctx context.Context, adminConnString, dbname string) error {
 	if err != nil {
 		return fmt.Errorf("连接 admin 库失败: %w", err)
 	}
-	defer func() {
-		if err := conn.Close(ctx); err != nil {
-			dlog.Warn("conn.close", "err", err)
-		}
-	}()
+	defer Close("db", ctx, conn)
 
 	var exists bool
 	if err := conn.QueryRow(ctx,
@@ -61,4 +57,11 @@ func EnsureSchema(ctx context.Context, conn *pgx.Conn) error {
 		return fmt.Errorf("初始化表结构失败: %w", err)
 	}
 	return nil
+}
+
+// Close 安全关闭连接（defer 用）：错误在内部记日志，调用方无需处理返回值
+func Close(module string, ctx context.Context, conn *pgx.Conn) {
+	if err := conn.Close(ctx); err != nil {
+		dlog.Warn("conn.close", "module", module, "err", err)
+	}
 }
