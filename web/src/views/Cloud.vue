@@ -102,10 +102,11 @@
         </el-form-item>
 
         <el-form-item label="类型" required>
-          <el-radio-group v-model="form.isDir">
+          <el-radio-group v-model="form.isDir" :disabled="editingId !== null">
             <el-radio :value="true">文件夹</el-radio>
             <el-radio :value="false">文件</el-radio>
           </el-radio-group>
+          <span v-if="editingId !== null" class="muted" style="margin-left: 8px">创建后不可改</span>
         </el-form-item>
 
         <el-form-item label="所属文件夹">
