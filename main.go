@@ -5,12 +5,15 @@ package main
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -19,6 +22,9 @@ import (
 	"file-ledger/internal/db"
 	"file-ledger/internal/registry"
 )
+
+//go:embed web/dist
+var webFS embed.FS
 
 // DatabaseConfig 数据库连接配置（本机 PgSQL）
 type DatabaseConfig struct {
@@ -115,11 +121,7 @@ func main() {
 	store := registry.NewStore(conn)
 	mux := http.NewServeMux()
 	api.RegisterRegistryRoutes(mux, store)
-
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, "<h1>file-ledger</h1><p>Service running: <a href=\"/api/registry\">/api/registry</a></p>")
-	})
+	mux.Handle("/", spaHandler())
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	log.Printf("file-ledger 启动: http://%s", addr)
@@ -127,4 +129,34 @@ func main() {
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// spaHandler 服务内嵌前端：命中文件返回文件，否则回退 index.html（history 路由刷新），/api/* 未命中返回 404。
+func spaHandler() http.Handler {
+	distFS, err := fs.Sub(webFS, "web/dist")
+	if err != nil {
+		log.Fatalf("内嵌前端读取失败: %v", err)
+	}
+	fileServer := http.FileServer(http.FS(distFS))
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := strings.TrimPrefix(r.URL.Path, "/")
+		if p == "" {
+			p = "index.html"
+		}
+		if strings.HasPrefix(p, "api/") {
+			writeNotFound(w)
+			return
+		}
+		if _, err := fs.Stat(distFS, p); err != nil {
+			r.URL.Path = "/" // SPA fallback：history 路由刷新不 404
+		}
+		fileServer.ServeHTTP(w, r)
+	})
+}
+
+func writeNotFound(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusNotFound)
+	_, _ = w.Write([]byte(`{"error":"接口不存在"}`))
 }

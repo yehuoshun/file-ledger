@@ -8,7 +8,8 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-dist
+# dist（提交入库：单 exe 需要 dist 随源码构建）
+# dist
 dist-ssr
 *.local
 
