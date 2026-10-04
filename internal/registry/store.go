@@ -9,7 +9,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"file-ledger/internal/logx"
 )
+
+var slog = logx.New("registry")
 
 // Store 台账存储：pgx 连接
 type Store struct {
@@ -88,8 +92,11 @@ func (s *Store) Create(ctx context.Context, e *Entry) (*Entry, error) {
 		e.Alias, e.ParentID, e.IsDir, e.Size, e.Note, tags, paths)
 	created, err := scanEntry(row)
 	if err != nil {
+		slog.Warn("create", "rid", logx.RIDFrom(ctx), "alias", e.Alias, "err", translateErr(err))
 		return nil, translateErr(err)
 	}
+	slog.Info("create", "rid", logx.RIDFrom(ctx), "id", created.ID, "alias", created.Alias,
+		"parent", nullable(created.ParentID), "paths", len(created.Paths))
 	return created, nil
 }
 
@@ -114,8 +121,11 @@ func (s *Store) Update(ctx context.Context, id string, e *Entry) (*Entry, error)
 		e.Alias, e.ParentID, e.IsDir, e.Size, e.Note, tags, paths, id)
 	updated, err := scanEntry(row)
 	if err != nil {
+		slog.Warn("update", "rid", logx.RIDFrom(ctx), "id", id, "err", translateErr(err))
 		return nil, translateErr(err)
 	}
+	slog.Info("update", "rid", logx.RIDFrom(ctx), "id", updated.ID, "alias", updated.Alias,
+		"parent", nullable(updated.ParentID), "paths", len(updated.Paths))
 	return updated, nil
 }
 
@@ -129,7 +139,16 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
+	slog.Info("delete", "rid", logx.RIDFrom(ctx), "id", id, "rows", tag.RowsAffected())
 	return nil
+}
+
+// nullable 指针转可打印值（nil → 空串）
+func nullable(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // checkParent 父条目存在性校验（parentId 为空=顶层，跳过）

@@ -20,6 +20,7 @@ import (
 
 	"file-ledger/internal/api"
 	"file-ledger/internal/db"
+	"file-ledger/internal/logx"
 	"file-ledger/internal/registry"
 )
 
@@ -115,7 +116,7 @@ func main() {
 	if err := db.EnsureSchema(ctx, conn); err != nil {
 		log.Fatalf("表结构初始化失败: %v", err)
 	}
-	log.Printf("数据库 %s 就绪", cfg.Database.DBName)
+	logx.New("main").Info("database.ready", "dbname", cfg.Database.DBName)
 
 	// 3. 挂路由
 	store := registry.NewStore(conn)
@@ -123,10 +124,12 @@ func main() {
 	api.RegisterRegistryRoutes(mux, store)
 	mux.Handle("/", spaHandler())
 
+	// 请求日志中间件（只记 /api/*）
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
-	log.Printf("file-ledger 启动: http://%s", addr)
+	logx.New("main").Info("server.start", "addr", addr, "db", cfg.Database.DBName,
+		"db_host", cfg.Database.Host, "db_port", cfg.Database.Port)
 
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := http.ListenAndServe(addr, api.WithLogging(mux)); err != nil {
 		log.Fatal(err)
 	}
 }

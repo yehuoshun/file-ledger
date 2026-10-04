@@ -5,13 +5,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 
 	_ "embed"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"file-ledger/internal/logx"
 )
+
+var dlog = logx.New("db")
 
 //go:embed schema.sql
 var SchemaSQL string
@@ -44,7 +47,7 @@ func EnsureDatabase(ctx context.Context, adminConnString, dbname string) error {
 		}
 		return fmt.Errorf("创建数据库 %s 失败: %w", dbname, err)
 	}
-	log.Printf("数据库 %s 创建完成", dbname)
+	dlog.Info("database.created", "dbname", dbname)
 	return nil
 }
 
