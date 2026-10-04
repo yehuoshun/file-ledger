@@ -100,8 +100,8 @@ func (l *Logger) log(lv Level, msg string, kv ...any) {
 		return
 	}
 	var b strings.Builder
-	b.WriteString(time.Now().Format("2006-01-02 15:04:05.000"))
-	fmt.Fprintf(&b, " [%s] %-10s %s", lv, l.module, msg)
+	_, _ = b.WriteString(time.Now().Format("2006-01-02 15:04:05.000"))
+	_, _ = b.WriteString(fmt.Sprintf(" [%s] %-10s %s", lv, l.module, msg))
 	for i := 0; i < len(kv); i++ {
 		key := fmt.Sprintf("%v", kv[i])
 		var val any = "?"
@@ -112,11 +112,11 @@ func (l *Logger) log(lv Level, msg string, kv ...any) {
 		if err, ok := val.(error); ok && err != nil {
 			val = err.Error()
 		}
-		b.WriteString(" ")
-		b.WriteString(key)
-		b.WriteString("=")
-		b.WriteString(fmt.Sprintf("%v", val))
+		_, _ = b.WriteString(" ")
+		_, _ = b.WriteString(key)
+		_, _ = b.WriteString("=")
+		_, _ = b.WriteString(fmt.Sprintf("%v", val))
 	}
-	b.WriteString("\n")
+	_, _ = b.WriteString("\n")
 	_, _ = io.WriteString(out, b.String())
 }
