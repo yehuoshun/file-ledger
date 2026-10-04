@@ -8,8 +8,7 @@
 -- CREATE DATABASE file_ledger;
 
 -- UUID v7 生成函数（纯 PL/pgSQL，PG 15+ 可用）
--- 格式：tttttttt-tttt-Vxxx-xxxx-xxxxxxxxxxxx  t=时间戳(ms) V=7 x=随机
--- 参考：https://www.rfc-editor.org/rfc/rfc9562
+-- 格式：tttttttt-tttt-7xxx-8xxx-xxxxxxxxxxxx（RFC 9562：8-4-4-4-12）
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE OR REPLACE FUNCTION uuid_generate_v7()
@@ -17,19 +16,19 @@ RETURNS uuid
 LANGUAGE plpgsql AS $$
 DECLARE
     ms      bigint;
-    rand    bytea;
+    hex     text;   -- 20 hex 字符（10 随机字节）
     hex_ms  text;
 BEGIN
     ms := (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::bigint;
-    rand := gen_random_bytes(10);
+    hex := encode(gen_random_bytes(10), 'hex');
     hex_ms := lpad(to_hex(ms), 12, '0');
 
     RETURN (
-        substr(hex_ms, 1, 8) || '-' ||
-        substr(hex_ms, 9, 4) || '-7' ||
-        encode(substr(rand, 1, 2), 'hex') || '-' ||
-        '8' || encode(substr(rand, 3, 1), 'hex') || '-' ||
-        encode(substr(rand, 4, 6), 'hex')
+        substr(hex_ms, 1, 8) || '-' ||   -- 时间戳高 32 位
+        substr(hex_ms, 9, 4) || '-7' ||  -- 时间戳低 16 位 + 版本号
+        substr(hex, 1, 3) || '-8' ||     -- 12 位随机 + 变体
+        substr(hex, 4, 3) || '-' ||
+        substr(hex, 7, 12)               -- 48 位随机
     )::uuid;
 END;
 $$;
