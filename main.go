@@ -61,14 +61,18 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /api/registry", func(w http.ResponseWriter, r *http.Request) {
+	if err := mux.HandleFunc("GET /api/registry", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, []any{})
-	})
+	}); err != nil {
+		log.Fatalf("注册 /api/registry 路由失败: %v", err)
+	}
 
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+	if err := mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprint(w, "<h1>file-ledger</h1><p>Service running: <a href=\"/api/registry\">/api/registry</a></p>")
-	})
+	}); err != nil {
+		log.Fatalf("注册首页路由失败: %v", err)
+	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	log.Printf("file-ledger 启动: http://%s", addr)
