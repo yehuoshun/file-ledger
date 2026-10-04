@@ -19,7 +19,7 @@ func NewStore(conn *pgx.Conn) *Store {
 	return &Store{conn: conn}
 }
 
-const entryCols = "id, alias, is_dir, size, note, tags, paths, created_at, updated_at"
+const entryCols = "id, alias, parent_id, is_dir, size, note, tags, paths, created_at, updated_at"
 
 // scanEntry 把查询行扫成 Entry
 func scanEntry(row pgx.Row) (*Entry, error) {
@@ -28,7 +28,7 @@ func scanEntry(row pgx.Row) (*Entry, error) {
 		tagsRaw  []byte
 		pathsRaw []byte
 	)
-	if err := row.Scan(&e.ID, &e.Alias, &e.IsDir, &e.Size, &e.Note,
+	if err := row.Scan(&e.ID, &e.Alias, &e.ParentID, &e.IsDir, &e.Size, &e.Note,
 		&tagsRaw, &pathsRaw, &e.CreatedAt, &e.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -41,7 +41,7 @@ func scanEntry(row pgx.Row) (*Entry, error) {
 	return &e, nil
 }
 
-// List 台账列表，按别名排序（前端展示顺序稳定）
+// List 台账全量（前端组树：Windows 式层级），按别名排序
 func (s *Store) List(ctx context.Context) ([]Entry, error) {
 	rows, err := s.conn.Query(ctx,
 		"SELECT "+entryCols+" FROM registry ORDER BY alias")
@@ -61,8 +61,11 @@ func (s *Store) List(ctx context.Context) ([]Entry, error) {
 	return out, rows.Err()
 }
 
-// Create 新增条目；id 由 DB 端 uuid_generate_v7() 生成
+// Create 新增条目；id 由 DB 端 uuid_generate_v7() 生成；父条目必须存在（虚拟文件夹层级）
 func (s *Store) Create(ctx context.Context, e *Entry) (*Entry, error) {
+	if err := s.checkParent(ctx, e.ParentID); err != nil {
+		return nil, err
+	}
 	tags, err := marshalJSONB(e.Tags)
 	if err != nil {
 		return nil, err
@@ -73,10 +76,10 @@ func (s *Store) Create(ctx context.Context, e *Entry) (*Entry, error) {
 	}
 
 	row := s.conn.QueryRow(ctx,
-		`INSERT INTO registry (alias, is_dir, size, note, tags, paths)
-		 VALUES ($1, $2, $3, $4, $5, $6)
+		`INSERT INTO registry (alias, parent_id, is_dir, size, note, tags, paths)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
 		 RETURNING `+entryCols,
-		e.Alias, e.IsDir, e.Size, e.Note, tags, paths)
+		e.Alias, e.ParentID, e.IsDir, e.Size, e.Note, tags, paths)
 	created, err := scanEntry(row)
 	if err != nil {
 		return nil, translateErr(err)
@@ -84,8 +87,11 @@ func (s *Store) Create(ctx context.Context, e *Entry) (*Entry, error) {
 	return created, nil
 }
 
-// Update 按 id 更新；返回更新后的条目
+// Update 按 id 更新；返回更新后的条目；父条目必须存在
 func (s *Store) Update(ctx context.Context, id string, e *Entry) (*Entry, error) {
+	if err := s.checkParent(ctx, e.ParentID); err != nil {
+		return nil, err
+	}
 	tags, err := marshalJSONB(e.Tags)
 	if err != nil {
 		return nil, err
@@ -96,10 +102,10 @@ func (s *Store) Update(ctx context.Context, id string, e *Entry) (*Entry, error)
 	}
 
 	row := s.conn.QueryRow(ctx,
-		`UPDATE registry SET alias=$1, is_dir=$2, size=$3, note=$4, tags=$5, paths=$6
-		 WHERE id=$7
+		`UPDATE registry SET alias=$1, parent_id=$2, is_dir=$3, size=$4, note=$5, tags=$6, paths=$7
+		 WHERE id=$8
 		 RETURNING `+entryCols,
-		e.Alias, e.IsDir, e.Size, e.Note, tags, paths, id)
+		e.Alias, e.ParentID, e.IsDir, e.Size, e.Note, tags, paths, id)
 	updated, err := scanEntry(row)
 	if err != nil {
 		return nil, translateErr(err)
@@ -116,6 +122,22 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
+	}
+	return nil
+}
+
+// checkParent 父条目存在性校验（parentId 为空=顶层，跳过）
+func (s *Store) checkParent(ctx context.Context, parentID *string) error {
+	if parentID == nil || *parentID == "" {
+		return nil
+	}
+	var exists bool
+	if err := s.conn.QueryRow(ctx,
+		"SELECT EXISTS (SELECT 1 FROM registry WHERE id = $1)", *parentID).Scan(&exists); err != nil {
+		return fmt.Errorf("校验父条目失败: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("父条目不存在")
 	}
 	return nil
 }

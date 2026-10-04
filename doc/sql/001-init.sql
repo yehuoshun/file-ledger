@@ -40,6 +40,7 @@ $$;
 CREATE TABLE IF NOT EXISTS registry (
     id          uuid        NOT NULL DEFAULT uuid_generate_v7(),
     alias       text        NOT NULL,
+    parent_id   uuid        NULL REFERENCES registry(id) ON DELETE CASCADE,
     is_dir      boolean     NOT NULL DEFAULT true,
     size        text        NOT NULL DEFAULT '',
     note        text        NOT NULL DEFAULT '',
@@ -52,13 +53,18 @@ CREATE TABLE IF NOT EXISTS registry (
     CONSTRAINT registry_alias_unique UNIQUE (alias)
 );
 
+-- 幂等迁移：老库补 parent_id（Windows 式文件夹树，根级为 NULL）
+ALTER TABLE registry ADD COLUMN IF NOT EXISTS parent_id uuid NULL REFERENCES registry(id) ON DELETE CASCADE;
+
 CREATE INDEX IF NOT EXISTS idx_registry_alias ON registry (alias);
 CREATE INDEX IF NOT EXISTS idx_registry_tags ON registry USING gin (tags);
+CREATE INDEX IF NOT EXISTS idx_registry_parent ON registry (parent_id);
 
 -- 字段注释（COMMENT ON 天然幂等，可重复执行）
-COMMENT ON TABLE registry IS '台账条目表';
+COMMENT ON TABLE registry IS '台账条目表（Windows 式文件夹树：parent_id 自引用）';
 COMMENT ON COLUMN registry.id IS '主键（UUID v7，服务端生成）';
 COMMENT ON COLUMN registry.alias IS '别名/名字，唯一';
+COMMENT ON COLUMN registry.parent_id IS '父条目 id（虚拟文件夹层级，NULL=顶层；级联删除）';
 COMMENT ON COLUMN registry.is_dir IS '是否文件夹（false=文件）';
 COMMENT ON COLUMN registry.size IS '大小（人类可读文本，如 1.2 GB）';
 COMMENT ON COLUMN registry.note IS '描述/备注';

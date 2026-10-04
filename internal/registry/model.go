@@ -15,9 +15,11 @@ type Path struct {
 }
 
 // Entry 台账条目（JSON 字段与前端 web/src/views/Cloud.vue 对齐）
+// ParentID 为空 = 顶层；非空 = 挂在某个虚拟文件夹下（Windows 式层级）
 type Entry struct {
 	ID        string   `json:"id"`
 	Alias     string   `json:"alias"`
+	ParentID  *string  `json:"parentId,omitempty"`
 	IsDir     bool     `json:"isDir"`
 	Size      string   `json:"size"`
 	Note      string   `json:"note"`
@@ -33,16 +35,18 @@ var (
 	ErrAliasTaken = errors.New("别名已存在")
 )
 
-// Validate 业务校验：别名必填唯一（唯一由 DB 约束兜底）、路径数组非空、每项类型合法且路径非空
+// Validate 业务校验：别名必填唯一（唯一由 DB 约束兜底）、路径数组非空、每项类型合法且路径非空。
+// 注意：文件夹（isDir=true）允许无路径——虚拟文件夹只是分类容器，路径可选。
 func (e *Entry) Validate() error {
 	e.Alias = strings.TrimSpace(e.Alias)
 	if e.Alias == "" {
 		return fmt.Errorf("别名不能为空")
 	}
 
-	if len(e.Paths) == 0 {
-		return fmt.Errorf("至少需要一条路径")
+	if !e.IsDir && len(e.Paths) == 0 {
+		return fmt.Errorf("文件条目至少需要一条路径")
 	}
+
 	for i, p := range e.Paths {
 		p.Type = strings.TrimSpace(p.Type)
 		p.Path = strings.TrimSpace(p.Path)

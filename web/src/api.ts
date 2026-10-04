@@ -11,6 +11,7 @@ export interface Path {
 export interface Entry {
   id: string
   alias: string
+  parentId?: string
   isDir: boolean
   size: string
   note: string
@@ -22,6 +23,7 @@ export interface Entry {
 
 export interface EntryForm {
   alias: string
+  parentId?: string | null
   isDir: boolean
   size: string
   note: string
