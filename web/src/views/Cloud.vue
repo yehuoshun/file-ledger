@@ -80,11 +80,15 @@
         </el-form-item>
 
         <template v-if="form.isDir">
-          <el-form-item label="路径" required>
+          <el-form-item :label="form.dirType === 'virtual' ? '指向' : '路径'" required>
             <el-select v-model="form.dirType" style="width: 100px">
               <el-option v-for="o in PATH_TYPE_OPTIONS" :key="o.value" :value="o.value" :label="o.label" />
             </el-select>
-            <el-input v-model="form.dirPath" placeholder="D:\docs" style="width: 300px; margin-left: 8px" />
+            <el-input
+              v-model="form.dirPath"
+              :placeholder="form.dirType === 'virtual' ? 'ali:docs 或 https://…' : (form.dirType === 'mount' ? 'Z:\\docs' : 'D:\\docs')"
+              style="width: 300px; margin-left: 8px"
+            />
           </el-form-item>
         </template>
         <template v-else>
@@ -94,7 +98,7 @@
                 <el-select v-model="p.type" style="width: 100px">
                   <el-option v-for="o in PATH_TYPE_OPTIONS" :key="o.value" :value="o.value" :label="o.label" />
                 </el-select>
-                <el-input v-model="p.path" placeholder="D:\docs" style="flex: 1" />
+                <el-input v-model="p.path" :placeholder="p.type === 'virtual' ? 'ali:docs 或 https://…' : 'D:\\docs'" style="flex: 1" />
                 <el-button v-if="form.paths.length > 1" link type="danger" @click="removePath(i)">×</el-button>
               </div>
             </div>
@@ -176,7 +180,7 @@ const form = reactive({
   size: '',
   note: '',
   tags: [] as string[],
-  dirType: 'local' as PathType,
+  dirType: 'virtual' as PathType, // 文件夹默认虚拟（虚拟文件夹实际不存在，仅记录指向）
   dirPath: '',
   paths: [{ type: 'local' as PathType, path: '' }],
 })
@@ -188,7 +192,7 @@ function resetForm() {
   form.note = ''
   form.tags = []
   form.paths = [{ type: 'local', path: '' }]
-  form.dirType = 'local'
+  form.dirType = 'virtual'
   form.dirPath = ''
   editingId.value = null
 }
@@ -207,7 +211,7 @@ function openEdit(entry: Entry) {
   form.note = entry.note || ''
   form.tags = [...(entry.tags || [])]
   if (entry.isDir) {
-    form.dirType = entry.paths[0]?.type || 'local'
+    form.dirType = entry.paths[0]?.type || 'virtual'
     form.dirPath = entry.paths[0]?.path || ''
   } else {
     form.paths = entry.paths.map((p: any) => ({ type: p.type, path: p.path }))
