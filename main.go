@@ -1,23 +1,41 @@
 // file-ledger 入口
-// 步骤1：HTTP 服务 :18765 + /api/registry 返回空数组 + 首页占位 + config.json 自动生成
+// 步骤1-2：HTTP 服务 :18765 + 台账 CRUD（PostgreSQL 存储）+ config.json 自动生成
 
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+
+	"file-ledger/internal/api"
+	"file-ledger/internal/db"
+	"file-ledger/internal/registry"
 )
 
-// Config 运行配置（与 doc/03-架构设计.md config 表对齐；存储已定 PostgreSQL，去掉 JSON 时代残留的 data_file）
+// DatabaseConfig 数据库连接配置（本机 PgSQL）
+type DatabaseConfig struct {
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	User     string `json:"user"`
+	Password string `json:"password"`
+	DBName   string `json:"dbname"`
+}
+
+// Config 运行配置
 type Config struct {
-	Host         string `json:"host"`
-	Port         int    `json:"port"`
-	DefaultDrive string `json:"default_drive"`
-	ThumbCache   string `json:"thumb_cache"`
+	Host         string         `json:"host"`
+	Port         int            `json:"port"`
+	DefaultDrive string         `json:"default_drive"`
+	ThumbCache   string         `json:"thumb_cache"`
+	Database     DatabaseConfig `json:"database"`
 }
 
 func defaultConfig() Config {
@@ -26,6 +44,13 @@ func defaultConfig() Config {
 		Port:         18765,
 		DefaultDrive: "Z:",
 		ThumbCache:   "data/thumbs",
+		Database: DatabaseConfig{
+			Host:     "127.0.0.1",
+			Port:     5432,
+			User:     "postgres",
+			Password: "root",
+			DBName:   "file_ledger",
+		},
 	}
 }
 
@@ -49,6 +74,12 @@ func loadConfig() (Config, error) {
 	return cfg, nil
 }
 
+// connString 拼接 pgx 连接串
+func (d DatabaseConfig) connString() string {
+	return fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
+		d.Host, d.Port, d.User, d.Password, d.DBName)
+}
+
 func main() {
 	if exe, err := os.Executable(); err == nil {
 		_ = os.Chdir(filepath.Dir(exe))
@@ -59,11 +90,31 @@ func main() {
 		log.Fatal(err)
 	}
 
-	mux := http.NewServeMux()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-	mux.HandleFunc("GET /api/registry", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, []any{})
-	})
+	// 1. 确保数据库存在（连 admin 库检查/创建）
+	adminConn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=postgres sslmode=disable",
+		cfg.Database.Host, cfg.Database.Port, cfg.Database.User, cfg.Database.Password)
+	if err := db.EnsureDatabase(ctx, adminConn, cfg.Database.DBName); err != nil {
+		log.Fatalf("数据库初始化失败: %v\n请确认 PostgreSQL 已启动且 config.json 的 database 段正确", err)
+	}
+
+	// 2. 连接业务库 + 初始化表结构（幂等）
+	conn, err := pgx.Connect(ctx, cfg.Database.connString())
+	if err != nil {
+		log.Fatalf("连接数据库 %s 失败: %v", cfg.Database.DBName, err)
+	}
+	defer conn.Close(ctx)
+	if err := db.EnsureSchema(ctx, conn); err != nil {
+		log.Fatalf("表结构初始化失败: %v", err)
+	}
+	log.Printf("数据库 %s 就绪", cfg.Database.DBName)
+
+	// 3. 挂路由
+	store := registry.NewStore(conn)
+	mux := http.NewServeMux()
+	api.RegisterRegistryRoutes(mux, store)
 
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -76,10 +127,4 @@ func main() {
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)
 	}
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
 }

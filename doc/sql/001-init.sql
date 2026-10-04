@@ -1,8 +1,10 @@
 -- file-ledger 台账数据库初始化
+-- ⚠️ 真源：internal/db/schema.sql（应用启动时自动执行，幂等）
+-- 本文件为手动初始化/排查用副本，修改时两处需同步。
 -- 适用版本: PostgreSQL 15+
 -- 连接串: postgres://127.0.0.1:5432/file_ledger?sslmode=disable
 
--- 建库（需在 psql 或 pgAdmin 中手动执行，或者由应用初始化时自动运行）
+-- 建库（应用会自动执行，也可手动）：
 -- CREATE DATABASE file_ledger;
 
 -- UUID v7 生成函数（纯 PL/pgSQL，PG 15+ 可用）
@@ -32,41 +34,26 @@ BEGIN
 END;
 $$;
 
--- registry 类型约束
-CREATE TYPE entry_type AS ENUM ('local', 'mount', 'virtual');
-
-CREATE TABLE registry (
+-- registry 台账表（字段与前端 web/src/views/Cloud.vue 对齐）
+-- paths: jsonb 数组 [{type: local|mount|virtual, path: string}]，多备份路径
+-- tags:  jsonb 字符串数组
+CREATE TABLE IF NOT EXISTS registry (
     id          uuid        NOT NULL DEFAULT uuid_generate_v7(),
     alias       text        NOT NULL,
-    type        entry_type  NOT NULL,
-    root        text        NULL,       -- local/mount 必填
-    rel_path    text        NULL,       -- virtual 必填
-    jump_url    text        NULL,       -- virtual 可选
-    note        text        NULL DEFAULT '',
-    tags        jsonb       NULL DEFAULT '[]'::jsonb,
-    read_only   boolean     NOT NULL DEFAULT false,
+    is_dir      boolean     NOT NULL DEFAULT true,
+    size        text        NOT NULL DEFAULT '',
+    note        text        NOT NULL DEFAULT '',
+    tags        jsonb       NOT NULL DEFAULT '[]'::jsonb,
+    paths       jsonb       NOT NULL DEFAULT '[]'::jsonb,
     created_at  timestamptz NOT NULL DEFAULT now(),
     updated_at  timestamptz NOT NULL DEFAULT now(),
 
     CONSTRAINT registry_pk PRIMARY KEY (id),
-    CONSTRAINT registry_alias_unique UNIQUE (alias),
-
-    -- 类型约束检查
-    CONSTRAINT chk_local_root CHECK (
-        type = 'local' AND root IS NOT NULL
-        OR type = 'mount' AND root IS NOT NULL
-        OR type = 'virtual'
-    ),
-    CONSTRAINT chk_virtual_rel CHECK (
-        type = 'virtual' AND rel_path IS NOT NULL
-        OR type != 'virtual'
-    )
+    CONSTRAINT registry_alias_unique UNIQUE (alias)
 );
 
--- 索引
-CREATE INDEX idx_registry_alias ON registry (alias);
-CREATE INDEX idx_registry_type ON registry (type);
-CREATE INDEX idx_registry_tags ON registry USING gin (tags);
+CREATE INDEX IF NOT EXISTS idx_registry_alias ON registry (alias);
+CREATE INDEX IF NOT EXISTS idx_registry_tags ON registry USING gin (tags);
 
 -- 自动更新 updated_at
 CREATE OR REPLACE FUNCTION trigger_set_updated_at()
@@ -78,7 +65,15 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER trg_registry_set_updated_at
-    BEFORE UPDATE ON registry
-    FOR EACH ROW
-    EXECUTE FUNCTION trigger_set_updated_at();
+-- PG 无 CREATE TRIGGER IF NOT EXISTS，用 DO 块判断
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger WHERE tgname = 'trg_registry_set_updated_at'
+    ) THEN
+        CREATE TRIGGER trg_registry_set_updated_at
+            BEFORE UPDATE ON registry
+            FOR EACH ROW
+            EXECUTE FUNCTION trigger_set_updated_at();
+    END IF;
+END $$;
