@@ -49,6 +49,18 @@ CREATE TABLE IF NOT EXISTS registry (
 CREATE INDEX IF NOT EXISTS idx_registry_alias ON registry (alias);
 CREATE INDEX IF NOT EXISTS idx_registry_tags ON registry USING gin (tags);
 
+-- 字段注释（COMMENT ON 天然幂等，可重复执行）
+COMMENT ON TABLE registry IS '台账条目表';
+COMMENT ON COLUMN registry.id IS '主键（UUID v7，服务端生成）';
+COMMENT ON COLUMN registry.alias IS '别名/名字，唯一';
+COMMENT ON COLUMN registry.is_dir IS '是否文件夹（false=文件）';
+COMMENT ON COLUMN registry.size IS '大小（人类可读文本，如 1.2 GB）';
+COMMENT ON COLUMN registry.note IS '描述/备注';
+COMMENT ON COLUMN registry.tags IS '标签数组（jsonb）';
+COMMENT ON COLUMN registry.paths IS '路径数组（jsonb）：[{type: local|mount|virtual, path}]，支持多备份';
+COMMENT ON COLUMN registry.created_at IS '创建时间（自动）';
+COMMENT ON COLUMN registry.updated_at IS '更新时间（自动维护）';
+
 -- 自动更新 updated_at
 CREATE OR REPLACE FUNCTION trigger_set_updated_at()
 RETURNS trigger
