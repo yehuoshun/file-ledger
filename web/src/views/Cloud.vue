@@ -17,7 +17,7 @@
       <el-button type="primary" size="default" @click="openAdd">+ 新增</el-button>
     </div>
 
-    <el-table :data="filtered" stripe style="width: 100%">
+    <el-table v-loading="loading" :data="filtered" stripe style="width: 100%" empty-text="暂无台账，点右上角「+ 新增」开始">
       <el-table-column label="名字" prop="alias" min-width="120" />
 
       <el-table-column label="路径" min-width="360">
@@ -124,43 +124,35 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive } from 'vue'
+import { ref, computed, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import TagSelector from '../components/TagSelector.vue'
 import { getTagColor } from '../constants/tags'
 import { PATH_TYPE_LABEL, PATH_TYPE_TAG, PATH_TYPE_OPTIONS } from '../constants/pathTypes'
+import { listEntries, createEntry, updateEntry, deleteEntry, type Entry, type EntryForm, type PathType } from '../api'
 
-// mock data（id 必填：删除/编辑依赖 id，缺失会导致删除清空全部、编辑变新增）
-const entries = ref<any[]>([
-  {
-    id: '1', alias: '文档', isDir: true, size: '1.2 GB', note: '项目文档', tags: ['工作', '重要'],
-    paths: [
-      { type: 'local', path: 'D:\\docs' },
-      { type: 'mount', path: 'Z:\\docs' },
-      { type: 'virtual', path: 'ali:docs' },
-    ],
-  },
-  {
-    id: '2', alias: '游戏盘', isDir: true, size: '128 GB', note: 'NAS 挂载', tags: ['娱乐'],
-    paths: [{ type: 'mount', path: 'Z:' }],
-  },
-  {
-    id: '3', alias: 'config.yaml', isDir: false, size: '4 KB', note: '', tags: [],
-    paths: [
-      { type: 'local', path: 'D:\\config.yaml' },
-      { type: 'virtual', path: 'ali:config' },
-    ],
-  },
-])
+// ── 数据（真实 API）──
+const entries = ref<Entry[]>([])
+const loading = ref(false)
 
-let nextId = 4
+async function loadEntries() {
+  loading.value = true
+  try {
+    entries.value = await listEntries()
+  } catch (e: any) {
+    ElMessage.error(e.message || '加载台账失败')
+  } finally {
+    loading.value = false
+  }
+}
+onMounted(loadEntries)
 
 // ── search / filter ──
 const search = ref('')
 const dirFilter = ref<boolean | null>(null)
 
 const filtered = computed(() =>
-  entries.value.filter((e: any) => {
+  entries.value.filter((e: Entry) => {
     if (dirFilter.value !== null && e.isDir !== dirFilter.value) return false
     if (search.value) {
       const q = search.value.toLowerCase()
@@ -184,9 +176,9 @@ const form = reactive({
   size: '',
   note: '',
   tags: [] as string[],
-  dirType: 'local' as const,
+  dirType: 'local' as PathType,
   dirPath: '',
-  paths: [{ type: 'local' as const, path: '' }],
+  paths: [{ type: 'local' as PathType, path: '' }],
 })
 
 function resetForm() {
@@ -207,7 +199,7 @@ function openAdd() {
   dialogVisible.value = true
 }
 
-function openEdit(entry: any) {
+function openEdit(entry: Entry) {
   editingId.value = entry.id
   form.alias = entry.alias
   form.isDir = entry.isDir
@@ -225,14 +217,14 @@ function openEdit(entry: any) {
 }
 
 function addPath() {
-  form.paths.push({ type: 'local', path: '' })
+  form.paths.push({ type: 'local' as PathType, path: '' })
 }
 
 function removePath(i: number) {
   form.paths.splice(i, 1)
 }
 
-function handleSave() {
+async function handleSave() {
   if (!form.alias) { ElMessage.warning('名字不能为空'); return }
   let paths
   if (form.isDir) {
@@ -243,32 +235,40 @@ function handleSave() {
     if (!paths.length) { ElMessage.warning('至少填一条路径'); return }
   }
 
-  const entry = {
+  const entry: EntryForm = {
     alias: form.alias,
     isDir: form.isDir,
     size: form.size || '',
     note: form.note,
     tags: [...form.tags],
-    paths: paths.map((p: any) => ({ type: p.type, path: p.path })),
+    paths: paths.map((p) => ({ type: p.type as PathType, path: p.path })),
   }
 
-  if (editingId.value) {
-    const idx = entries.value.findIndex((e: any) => e.id === editingId.value)
-    if (idx !== -1) { entries.value[idx] = { ...entries.value[idx], ...entry } }
-    ElMessage.success('已更新')
-  } else {
-    entries.value.push({ id: String(nextId++), ...entry })
-    ElMessage.success('已新增')
+  try {
+    if (editingId.value) {
+      await updateEntry(editingId.value, entry)
+      ElMessage.success('已更新')
+    } else {
+      await createEntry(entry)
+      ElMessage.success('已新增')
+    }
+    dialogVisible.value = false
+    await loadEntries()
+  } catch (e: any) {
+    ElMessage.error(e.message || '保存失败')
   }
-  dialogVisible.value = false
 }
 
-async function handleDelete(row: any) {
+async function handleDelete(row: Entry) {
   try {
     await ElMessageBox.confirm(`确定删除「${row.alias}」？`, '确认', { type: 'warning' })
-    entries.value = entries.value.filter((e: any) => e.id !== row.id)
+    await deleteEntry(row.id)
     ElMessage.success('已删除')
-  } catch { /* cancelled */ }
+    await loadEntries()
+  } catch (e: any) {
+    if (e === 'cancel' || e === 'close') return // 用户取消
+    ElMessage.error(e.message || '删除失败')
+  }
 }
 </script>
 
