@@ -122,7 +122,7 @@ func main() {
 	store := registry.NewStore(conn)
 	mux := http.NewServeMux()
 	api.RegisterRegistryRoutes(mux, store)
-	mux.Handle("/", spaHandler())
+	mux.Handle("/", SPAHandler())
 
 	// 请求日志中间件（只记 /api/*）
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
@@ -134,8 +134,9 @@ func main() {
 	}
 }
 
-// spaHandler 服务内嵌前端：命中文件返回文件，否则回退 index.html（history 路由刷新），/api/* 未命中返回 404。
-func spaHandler() http.Handler {
+// SPAHandler 服务内嵌前端：命中文件返回文件，否则回退 index.html（history 路由刷新），/api/* 未命中返回 404。
+// 导出以便 internal/test 黑盒测试。
+func SPAHandler() http.Handler {
 	distFS, err := fs.Sub(webFS, "web/dist")
 	if err != nil {
 		log.Fatalf("内嵌前端读取失败: %v", err)

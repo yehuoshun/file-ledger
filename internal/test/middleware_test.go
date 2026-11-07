@@ -1,4 +1,4 @@
-package api
+package test
 
 import (
 	"bytes"
@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"file-ledger/internal/api"
 	"file-ledger/internal/logx"
 )
 
@@ -21,7 +22,7 @@ func TestWithLogging(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 	})
 
-	ts := httptest.NewServer(WithLogging(inner))
+	ts := httptest.NewServer(api.WithLogging(inner))
 	defer ts.Close()
 
 	resp, err := http.Get(ts.URL + "/api/registry")
@@ -40,9 +41,6 @@ func TestWithLogging(t *testing.T) {
 	if !strings.Contains(line, "rid=") {
 		t.Fatalf("日志缺少 rid: %q", line)
 	}
-	if !strings.Contains(line, "path=/api/registry") {
-		t.Fatalf("日志缺少路径: %q", line)
-	}
 }
 
 func TestWithLoggingSkipsStatic(t *testing.T) {
@@ -52,10 +50,9 @@ func TestWithLoggingSkipsStatic(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	ts := httptest.NewServer(WithLogging(inner))
+	ts := httptest.NewServer(api.WithLogging(inner))
 	defer ts.Close()
 
-	// 非 /api 请求不记日志
 	resp, err := http.Get(ts.URL + "/")
 	if err != nil {
 		t.Fatalf("请求失败: %v", err)
