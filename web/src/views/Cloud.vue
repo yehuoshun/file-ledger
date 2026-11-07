@@ -122,20 +122,8 @@
           />
         </el-form-item>
 
-        <template v-if="form.isDir">
-          <el-form-item :label="form.dirType === 'virtual' ? '指向（可选）' : '路径（可选）'">
-            <el-select v-model="form.dirType" style="width: 100px">
-              <el-option v-for="o in PATH_TYPE_OPTIONS" :key="o.value" :value="o.value" :label="o.label" />
-            </el-select>
-            <el-input
-              v-model="form.dirPath"
-              :placeholder="form.dirType === 'virtual' ? 'ali:docs 或 https://…' : (form.dirType === 'mount' ? 'Z:\\docs' : 'D:\\docs')"
-              style="width: 300px; margin-left: 8px"
-            />
-            <div class="field-hint muted">虚拟文件夹可不填（纯分类容器），填了表示映射真实目录</div>
-          </el-form-item>
-        </template>
-        <template v-else>
+        <!-- 文件夹=纯分类容器，不再经表单填指向/路径（定版 2026-11-07）；存量已填的编辑时原样保留 -->
+        <template v-if="!form.isDir">
           <el-form-item label="路径" required>
             <div class="path-list">
               <div v-for="(p, i) in form.paths" :key="i" class="path-row">
@@ -150,7 +138,8 @@
           </el-form-item>
         </template>
 
-        <el-form-item label="大小">
+        <!-- 大小：仅文件条目手填；文件夹大小是计算式（子条目合计），不在此填 -->
+        <el-form-item v-if="!form.isDir" label="大小">
           <el-input v-model="form.size" placeholder="例如：1.2 GB" style="width: 200px" />
         </el-form-item>
 
@@ -327,6 +316,9 @@ async function handleSave() {
   if (!form.alias) { ElMessage.warning('名字不能为空'); return }
   let paths
   if (form.isDir) {
+    // 文件夹=纯分类容器（定版 2026-11-07）：表单不再提供指向/路径输入。
+    // 编辑存量带路径的文件夹时 openEdit 已把 paths[0] 回填进 dirType/dirPath，
+    // 这里用它原样保留（用户不可改，但不会被误清空）。
     paths = form.dirPath.trim() ? [{ type: form.dirType, path: form.dirPath.trim() }] : []
   } else {
     paths = form.paths.filter((p) => p.path.trim())
@@ -337,7 +329,7 @@ async function handleSave() {
     alias: form.alias,
     parentId: form.parentId || null,
     isDir: form.isDir,
-    size: form.size || '',
+    size: form.isDir ? '' : form.size || '',
     note: form.note,
     tags: [...form.tags],
     paths: paths.map((p) => ({ type: p.type as PathType, path: p.path })),
