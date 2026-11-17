@@ -6,7 +6,11 @@
     <!-- 右侧：当前文件夹内容 -->
     <main class="content-panel">
       <div class="toolbar">
-        <FolderBreadcrumbs :crumbs="breadcrumbs" @navigate="enterFolder" />
+        <div class="toolbar-left">
+          <FolderBreadcrumbs :crumbs="breadcrumbs" @navigate="enterFolder" />
+          <!-- 云端列表是滚动加载，总数只能用后端给的 total（不是已加载条数） -->
+          <span class="total-hint">共 {{ total }} 条</span>
+        </div>
 
         <div class="toolbar-actions">
           <el-select v-model="dirFilter" placeholder="类型" clearable size="default" style="width: 110px">
@@ -27,8 +31,14 @@
       </div>
 
       <EntryTable
-        :rows="filtered"
+        ref="tableRef"
+        :rows="items"
         :loading="loading"
+        :loading-more="loadingMore"
+        :total="total"
+        :has-more="hasMore"
+        :empty-text="emptyText"
+        @load-more="loadMore"
         @row-dblclick="onRowDblclick"
         @edit="openEdit"
         @delete="handleDelete"
@@ -52,7 +62,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import FolderTreePanel from '../components/cloud/FolderTreePanel.vue'
 import FolderBreadcrumbs from '../components/cloud/FolderBreadcrumbs.vue'
@@ -65,56 +75,78 @@ import { canBrowsePath } from '../utils/paths'
 import type { Entry, EntryForm } from '../api'
 
 // ── 数据与派生（全部逻辑在 composable 里，本组件只做编排）──
-const { entries, loading, reload, save, remove } = useEntries()
-const { pid, treeData, countDescendants, folderOptions } = useFolderTree(entries)
-onMounted(reload)
+// 列表：分页累积（滚动加载）；文件夹树：单独拉全部文件夹（量小）
+const { items, total, loading, loadingMore, hasMore, query, load, loadMore, save, remove } = useEntries()
+const { treeData, loadFolders, countDescendants, folderOptions, findFolder } = useFolderTree()
+
+const tableRef = ref<InstanceType<typeof EntryTable> | null>(null)
+const treeRef = ref<InstanceType<typeof FolderTreePanel> | null>(null)
+
+onMounted(() => {
+  load(true)
+  loadFolders()
+})
 
 // ── 当前文件夹与树高亮 ──
 const currentFolder = ref<string | null>(null)
-const treeRef = ref<InstanceType<typeof FolderTreePanel> | null>(null)
+
+// 回第一屏：列表回到顶部 + 重新拉第一屏（切文件夹/改搜索/改类型过滤都走这里）
+function resetList() {
+  tableRef.value?.scrollToTop()
+  load(true)
+}
 
 // 进入某个文件夹（Windows 语义：双击文件夹 = 进入）；id 为 null 表示回到顶层
 function enterFolder(id: string | null) {
   currentFolder.value = id
-  if (id) nextTick(() => treeRef.value?.setCurrentKey(id))
+  query.parentId = id
+  nextTick(() => treeRef.value?.setCurrentKey(id))
+  resetList()
 }
 
-// ── 面包屑 ──
+// ── 面包屑：从 folders 按 parentId 上溯（列表已分页，不能再从当前页取父级）──
 const breadcrumbs = computed(() => {
   const chain: { id: string | null; label: string }[] = [{ id: null, label: '虚拟网盘' }]
-  let cur: Entry | undefined
-  if (currentFolder.value) {
-    cur = entries.value.find((e) => e.id === currentFolder.value)
+  if (!currentFolder.value) return chain
+  const stack: { id: string; label: string }[] = []
+  let cur = findFolder(currentFolder.value)
+  while (cur) {
+    stack.unshift({ id: cur.id, label: cur.alias })
+    cur = cur.parentId ? findFolder(cur.parentId) : undefined
   }
-  const stack: Entry[] = []
-  while (cur && cur.isDir) {
-    stack.unshift(cur)
-    cur = cur.parentId ? entries.value.find((e) => e.id === cur!.parentId) : undefined
-  }
-  chain.push(...stack.map((e) => ({ id: e.id, label: e.alias })))
-  return chain
+  return chain.concat(stack)
 })
 
-// ── 右侧列表：当前文件夹的直接子条目（文件夹在前，别名排序）──
+// ── 右侧列表：搜索词与类型过滤（都走后端，改了就回第一屏）──
 const search = ref('')
 const dirFilter = ref<boolean | null>(null)
 
-const filtered = computed(() => {
-  let list = entries.value.filter((e) => pid(e) === currentFolder.value)
-  if (dirFilter.value !== null) list = list.filter((e) => e.isDir === dirFilter.value)
-  if (search.value) {
-    const q = search.value.toLowerCase()
-    list = list.filter((e) => {
-      const matchName = e.alias.toLowerCase().includes(q)
-      const matchNote = (e.note || '').toLowerCase().includes(q)
-      const matchTags = (e.tags || []).some((t) => t.toLowerCase().includes(q))
-      return matchName || matchNote || matchTags
-    })
-  }
-  return [...list].sort((a, b) =>
-    a.isDir === b.isDir ? a.alias.localeCompare(b.alias, 'zh') : a.isDir ? -1 : 1,
-  )
+const SEARCH_DEBOUNCE = 300
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+
+watch(search, () => {
+  if (searchTimer !== undefined) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    searchTimer = undefined
+    query.q = search.value.trim()
+    resetList()
+  }, SEARCH_DEBOUNCE)
 })
+
+watch(dirFilter, () => {
+  query.isDir = dirFilter.value
+  resetList()
+})
+
+onUnmounted(() => {
+  if (searchTimer !== undefined) clearTimeout(searchTimer)
+})
+
+const emptyText = computed(() =>
+  search.value.trim() || dirFilter.value !== null
+    ? '没有匹配的条目'
+    : '空文件夹，点右上角「+ 新增」添加条目',
+)
 
 // ── 双击行：文件夹 → 进入；文件 → 能浏览的直接打开所在目录，虚拟路径只提示（复制/跳转是步骤5）──
 function onRowDblclick(row: Entry) {
@@ -161,6 +193,7 @@ async function onDialogSubmit(form: EntryForm) {
   const isEdit = !!editingEntry.value
   try {
     await save(editingEntry.value?.id ?? null, form)
+    await loadFolders() // 可能新增/移动了文件夹，树要跟着变
     ElMessage.success(isEdit ? '已更新' : '已新增')
     dialogVisible.value = false
   } catch (e: any) {
@@ -168,13 +201,14 @@ async function onDialogSubmit(form: EntryForm) {
   }
 }
 
-// ── 删除：文件夹级联删子（Windows 语义），确认框提示子条目数 ──
+// ── 删除：文件夹级联删子（Windows 语义），确认框提示子孙文件夹数 ──
 async function handleDelete(row: Entry) {
   const extra = row.isDir ? countDescendants(row.id) : 0
-  const tip = extra > 0 ? `，将同时删除其下 ${extra} 个子条目` : ''
+  const tip = extra > 0 ? `，其下 ${extra} 个子文件夹会一起删除` : ''
   try {
     await ElMessageBox.confirm(`确定删除「${row.alias}」？${tip}`, '确认', { type: 'warning' })
     await remove(row.id)
+    if (row.isDir) await loadFolders() // 删了文件夹，树要重算
     ElMessage.success('已删除')
     if (currentFolder.value === row.id) enterFolder(null)
   } catch (e: any) {
@@ -199,17 +233,31 @@ function openBrowser(path: string) {
   gap: 16px;
   height: 100%;
 }
+/* 右栏做成纵向 flex：工具栏固定，列表自己滚动（固定高度交给 entry-scroll） */
 .content-panel {
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .toolbar {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 16px;
   flex-wrap: wrap;
   gap: 12px;
+}
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.total-hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 .toolbar-actions {
   display: flex;

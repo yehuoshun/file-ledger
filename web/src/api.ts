@@ -47,8 +47,51 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return data as T
 }
 
-export function listEntries(): Promise<Entry[]> {
-  return request<Entry[]>(BASE)
+// ── 台账列表（云盘滚动加载版）──
+// 后端 GET /api/registry?parent_id=&q=&limit=&offset=&is_dir= → {items,total}
+//   parent_id 空 = 顶层；q 按名字/描述/标签包含匹配；limit 默认 50 最大 200；
+//   is_dir 为 'true'/'false'，不传 = 都返回。
+// 文件夹树单独走 GET /api/registry/folders（全部文件夹的扁平列表，量小，一次拉全）。
+
+export interface EntryPage {
+  items: Entry[]
+  total: number
+}
+
+export interface EntryQuery {
+  parentId?: string | null
+  q?: string
+  limit?: number
+  offset?: number
+  isDir?: boolean | null
+}
+
+export function listEntries(params: EntryQuery = {}): Promise<EntryPage> {
+  const qs = new URLSearchParams()
+  // 顶层用空串表示（契约写法 parent_id=），文件夹传 id
+  qs.set('parent_id', params.parentId?.trim() || '')
+  if (params.q?.trim()) qs.set('q', params.q.trim())
+  if (params.limit !== undefined) qs.set('limit', String(params.limit))
+  if (params.offset !== undefined) qs.set('offset', String(params.offset))
+  if (params.isDir === true) qs.set('is_dir', 'true')
+  else if (params.isDir === false) qs.set('is_dir', 'false')
+  return request<EntryPage>(`${BASE}?${qs.toString()}`)
+}
+
+// 文件夹引用：树/面包屑/所属文件夹下拉只关心这三个字段
+export interface FolderRef {
+  id: string
+  alias: string
+  parentId?: string | null
+}
+
+export interface FolderPage {
+  items: FolderRef[]
+  total: number
+}
+
+export function listFolders(): Promise<FolderPage> {
+  return request<FolderPage>(`${BASE}/folders`)
 }
 
 export function createEntry(form: EntryForm): Promise<Entry> {

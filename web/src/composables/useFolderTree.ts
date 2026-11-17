@@ -1,5 +1,6 @@
-import { computed, type Ref } from 'vue'
-import type { Entry } from '../api'
+import { computed, ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import { listFolders, type FolderRef } from '../api'
 
 export interface TreeNode {
   id: string
@@ -7,28 +8,55 @@ export interface TreeNode {
   children: TreeNode[]
 }
 
-// 台账的树形派生：树结构、子孙计数、层级下拉选项（纯计算，不持有状态）
-export function useFolderTree(entries: Ref<Entry[]>) {
-  const pid = (e: Entry | null | undefined) => e?.parentId ?? null
+// 文件夹树的数据源 + 树形派生（树结构、子孙计数、层级下拉选项）。
+// 云盘列表改分页后，树不能再用「当前页的条目」拼：单独拉全部文件夹（量小，一次拉全）。
+export function useFolderTree() {
+  const folders = ref<FolderRef[]>([])
+  const loading = ref(false)
+
+  async function loadFolders() {
+    loading.value = true
+    try {
+      const page = await listFolders()
+      folders.value = page.items ?? []
+    } catch (e: any) {
+      ElMessage.error(e.message || '加载文件夹失败')
+    } finally {
+      loading.value = false
+    }
+  }
+
+  const pid = (f: FolderRef | null | undefined) => f?.parentId ?? null
+
+  const folderMap = computed(() => {
+    const m = new Map<string, FolderRef>()
+    for (const f of folders.value) m.set(f.id, f)
+    return m
+  })
+
+  // 面包屑/上溯用：按 id 取文件夹（拿不到 = 已删除或还没加载）
+  function findFolder(id: string): FolderRef | undefined {
+    return folderMap.value.get(id)
+  }
 
   function buildTree(parentId: string | null = null): TreeNode[] {
-    return entries.value
-      .filter((e) => e.isDir && pid(e) === parentId)
-      .map((e) => ({ id: e.id, alias: e.alias, children: buildTree(e.id) }))
+    return folders.value
+      .filter((f) => pid(f) === parentId)
+      .map((f) => ({ id: f.id, alias: f.alias, children: buildTree(f.id) }))
   }
 
   const treeData = computed(() => buildTree(null))
 
-  // 文件夹级联删子（Windows 语义）：子条目总数
+  // 文件夹级联删子（Windows 语义）：其下子孙文件夹总数（文件不在文件夹表里，不计）
   function countDescendants(id: string): number {
     let n = 0
     const stack = [id]
     while (stack.length) {
       const p = stack.pop()!
-      for (const e of entries.value) {
-        if (pid(e) === p) {
+      for (const f of folders.value) {
+        if (pid(f) === p) {
           n++
-          if (e.isDir) stack.push(e.id)
+          stack.push(f.id)
         }
       }
     }
@@ -36,10 +64,10 @@ export function useFolderTree(entries: Ref<Entry[]>) {
   }
 
   function isDescendantOf(id: string, ancestorId: string): boolean {
-    let cur = entries.value.find((e) => e.id === id)
+    let cur = folderMap.value.get(id)
     while (cur?.parentId) {
       if (cur.parentId === ancestorId) return true
-      cur = entries.value.find((e) => e.id === cur!.parentId)
+      cur = folderMap.value.get(cur.parentId)
     }
     return false
   }
@@ -48,8 +76,8 @@ export function useFolderTree(entries: Ref<Entry[]>) {
   function folderOptions(excludeId: string | null): { id: string; label: string }[] {
     const out: { id: string; label: string }[] = []
     const walk = (parent: string | null, prefix: string) => {
-      const kids = entries.value
-        .filter((e) => e.isDir && pid(e) === parent)
+      const kids = folders.value
+        .filter((f) => pid(f) === parent)
         .sort((a, b) => a.alias.localeCompare(b.alias, 'zh'))
       for (const k of kids) {
         if (excludeId && (k.id === excludeId || isDescendantOf(k.id, excludeId))) continue
@@ -62,5 +90,16 @@ export function useFolderTree(entries: Ref<Entry[]>) {
     return out
   }
 
-  return { pid, buildTree, treeData, countDescendants, isDescendantOf, folderOptions }
+  return {
+    folders,
+    loading,
+    loadFolders,
+    findFolder,
+    pid,
+    buildTree,
+    treeData,
+    countDescendants,
+    isDescendantOf,
+    folderOptions,
+  }
 }
