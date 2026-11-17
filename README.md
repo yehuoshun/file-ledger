@@ -30,11 +30,16 @@ Windows 本地工具：像 Windows 资源管理器一样管理你的常用路径
 
 ## 构建
 
-```bash
-cd web && npm run build     # 前端构建（dist 入库）
-cd .. && go build -o file-ledger.exe   # Windows 交叉编译：GOOS=windows go build
+产物不落在仓库目录里（exe 不进项目目录），统一输出到仓库外的构建目录：
+
+```powershell
+cd web; npm run build        # 前端构建（dist 入库，单 exe 需要）
+cd ..; .\build.ps1           # 编译到 D:\Development\build\file-ledger\file-ledger.exe
 ```
 
-运行：双击 `file-ledger.exe` → 自动建库建表 → 浏览器打开 http://127.0.0.1:18765
+`build.ps1` 参数：`-OutDir <目录>` 换输出位置，`-WithWeb` 连前端一起构建（等价于先跑 npm run build）。
+等价的手工命令（输出位置可按需改）：`go build -o D:\Development\build\file-ledger\file-ledger.exe .`
 
-配置：exe 旁 `config.json`（端口、挂载盘符、PostgreSQL 连接）。
+运行：双击 `D:\Development\build\file-ledger\file-ledger.exe` → 自动建库建表 → 浏览器打开 http://127.0.0.1:18765
+
+配置：exe 旁 `config.json`（端口、挂载盘符、PostgreSQL 连接），首次运行自动生成。
