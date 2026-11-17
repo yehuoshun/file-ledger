@@ -126,16 +126,17 @@
         </el-form-item>
 
         <el-form-item label="所属文件夹">
-          <el-tree-select
+          <!-- 用扁平「层级路径」下拉，不用树选择器：树里点一下就选中，极易误触（老板 2026-11-17 反馈） -->
+          <el-select
             v-model="form.parentId"
-            :data="treeSelectData"
-            :props="{ label: 'alias', children: 'children' }"
-            node-key="id"
-            check-strictly
+            filterable
             clearable
-            placeholder="不选 = 顶层"
+            placeholder="不选 = 顶层（虚拟网盘根）"
             style="width: 100%"
-          />
+            no-data-text="还没有文件夹"
+          >
+            <el-option v-for="o in folderOptions" :key="o.id" :label="o.label" :value="o.id" />
+          </el-select>
         </el-form-item>
 
         <!-- 文件夹=纯分类容器，不再经表单填指向/路径（定版 2026-11-07）；存量已填的编辑时原样保留 -->
@@ -222,10 +223,33 @@ function buildTree(parentId: string | null): TreeNode[] {
 
 const treeData = computed(() => buildTree(null))
 
-// 树选择器数据：根节点「顶层」+ 全树
-const treeSelectData = computed(() => [
-  { id: '', alias: '顶层', children: buildTree(null) as any },
-])
+// 所属文件夹下拉的选项：扁平「层级路径」（开发环境 / 数据库），比树选择器不容易误触。
+// 编辑文件夹时排除自己与自己的子孙，避免把文件夹挂进自己的子树里。
+function isDescendantOf(id: string, ancestorId: string): boolean {
+  let cur = entries.value.find((e) => e.id === id)
+  while (cur?.parentId) {
+    if (cur.parentId === ancestorId) return true
+    cur = entries.value.find((e) => e.id === cur!.parentId)
+  }
+  return false
+}
+
+const folderOptions = computed(() => {
+  const out: { id: string; label: string }[] = []
+  const walk = (parent: string | null, prefix: string) => {
+    const kids = entries.value
+      .filter((e) => e.isDir && pid(e) === parent)
+      .sort((a, b) => a.alias.localeCompare(b.alias, 'zh'))
+    for (const k of kids) {
+      if (editingId.value && (k.id === editingId.value || isDescendantOf(k.id, editingId.value))) continue
+      const label = prefix ? `${prefix} / ${k.alias}` : k.alias
+      out.push({ id: k.id, label })
+      walk(k.id, label)
+    }
+  }
+  walk(null, '')
+  return out
+})
 
 const currentFolder = ref<string | null>(null)
 
