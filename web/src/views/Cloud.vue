@@ -7,6 +7,7 @@
         <el-button link type="primary" size="small" @click="openAdd(null)">+ 新建文件夹</el-button>
       </div>
       <el-tree
+        ref="treeRef"
         :data="treeData"
         node-key="id"
         :props="{ label: 'alias', children: 'children' }"
@@ -45,7 +46,15 @@
         </div>
       </div>
 
-      <el-table v-loading="loading" :data="filtered" stripe style="width: 100%" empty-text="空文件夹，点右上角「+ 新增」添加条目">
+      <el-table
+        v-loading="loading"
+        :data="filtered"
+        stripe
+        highlight-current-row
+        style="width: 100%"
+        empty-text="空文件夹，点右上角「+ 新增」添加条目"
+        @row-dblclick="onRowDblclick"
+      >
         <el-table-column label="名字" min-width="140">
           <template #default="{ row }">
             <span v-if="row.isDir" class="dir-name">📁 {{ row.alias }}</span>
@@ -171,7 +180,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive, onMounted } from 'vue'
+import { ref, computed, reactive, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { FolderOpened } from '@element-plus/icons-vue'
 import TagSelector from '../components/TagSelector.vue'
@@ -220,8 +229,35 @@ const treeSelectData = computed(() => [
 
 const currentFolder = ref<string | null>(null)
 
+// 左侧树的实例：进入文件夹时同步高亮，避免「列表已经在里面、树还停在原处」
+const treeRef = ref<{ setCurrentKey: (key: string | null) => void } | null>(null)
+
+// 进入某个文件夹（Windows 语义：双击文件夹 = 进入）；id 为 null 表示回到顶层
+function enterFolder(id: string | null) {
+  currentFolder.value = id
+  if (id) nextTick(() => treeRef.value?.setCurrentKey(id))
+}
+
 function onNodeClick(node: TreeNode) {
-  currentFolder.value = node.id
+  enterFolder(node.id)
+}
+
+// 双击行：文件夹 → 进入；文件 → 能浏览的直接打开所在目录，虚拟路径只提示（复制/跳转是步骤5）
+function onRowDblclick(row: Entry) {
+  if (row.isDir) {
+    enterFolder(row.id)
+    return
+  }
+  const browsable = (row.paths || []).find((p) => canBrowse(p))
+  if (browsable) {
+    openBrowser(browsable.path)
+    return
+  }
+  if (row.paths?.length) {
+    ElMessage.info('虚拟路径暂不支持双击打开，步骤 5 会做成复制路径 / 跳转链接')
+  } else {
+    ElMessage.warning('这条没有路径，无法打开')
+  }
 }
 
 // ── 面包屑 ──

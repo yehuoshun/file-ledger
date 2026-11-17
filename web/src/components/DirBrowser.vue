@@ -49,6 +49,7 @@
             empty-text="这个目录是空的"
             class="browser-table"
             @row-click="onRowClick"
+            @row-dblclick="onRowClick"
           >
             <el-table-column label="名称" min-width="300">
               <template #default="{ row }">
