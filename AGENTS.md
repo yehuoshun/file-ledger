@@ -22,14 +22,15 @@ Windows 本地「文件台账」工具：单 exe（Go 后端 + go:embed 内嵌 V
 | `main.go` | 入口：配置、建库建表、起服务、开浏览器、挂 embed |
 | `internal/registry` | 台账模型 + PostgreSQL 存储 |
 | `internal/fsx` | 只读列目录（路径规范化、防穿越、排序、截断） |
-| `internal/api` | REST 处理器与路由（registry.go / fs.go） |
+| `internal/api` | REST 处理器与路由（registry.go / fs.go / tags.go） |
+| `internal/tag` | 标签字典模型 + PostgreSQL 存储（改名/删除事务同步 `registry.tags`） |
 | `internal/db`、`internal/logx` | 建库建表、结构化日志（rid） |
 | `internal/test` | 黑盒测试（HTTP 端到端） |
 | `web/src/views` | 页面，**只做编排** |
 | `web/src/components` | 可复用组件；某页面私有的子组件放 `components/<页面名>/` |
 | `web/src/composables` | 数据与业务逻辑（调 api、派生状态） |
 | `web/src/utils` | 跨组件复用的纯函数 |
-| `web/src/constants` | 枚举、标签色等常量 |
+| `web/src/constants` | 枚举等常量（标签与配色已改由后端 `tag` 表管理，见 `composables/useTags.ts`） |
 | `doc/` | 01 需求 / 02 选型 / 03 架构 / 04 计划 / 05 进度 |
 
 **前端分层约定（高内聚低耦合，老板 2026-11-17 要求）**：
