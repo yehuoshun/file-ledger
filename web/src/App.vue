@@ -18,10 +18,20 @@
           <el-icon><FolderOpened /></el-icon>
           <span>虚拟网盘</span>
         </el-menu-item>
-        <el-menu-item index="/settings">
-          <el-icon><Setting /></el-icon>
-          <span>设置</span>
-        </el-menu-item>
+        <el-sub-menu index="settings">
+          <template #title>
+            <el-icon><Setting /></el-icon>
+            <span>设置</span>
+          </template>
+          <el-menu-item index="/settings/general">
+            <el-icon><Operation /></el-icon>
+            <span>基本设置</span>
+          </el-menu-item>
+          <el-menu-item index="/settings/tags">
+            <el-icon><PriceTag /></el-icon>
+            <span>标签管理</span>
+          </el-menu-item>
+        </el-sub-menu>
       </el-menu>
     </el-aside>
 
@@ -35,7 +45,7 @@
 
 <script setup lang="ts">
 import { useRoute } from 'vue-router'
-import { HomeFilled, FolderOpened, Setting } from '@element-plus/icons-vue'
+import { HomeFilled, FolderOpened, Setting, Operation, PriceTag } from '@element-plus/icons-vue'
 
 const route = useRoute()
 </script>
