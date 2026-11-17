@@ -83,6 +83,70 @@ func (s *Store) List(ctx context.Context) ([]Tag, error) {
 	return out, rows.Err()
 }
 
+// likeEscaper 转义 LIKE/ILIKE 通配符（PG 默认转义符是反斜杠），让用户输入的百分号/下划线/反斜杠按字面匹配
+var likeEscaper = strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`)
+
+// escapeLike 把搜索词里的 LIKE 通配符转义成字面量
+func escapeLike(q string) string { return likeEscaper.Replace(q) }
+
+// ListPaged 按名字包含匹配（大小写不敏感）分页查询标签，返回当页数据与匹配总数。
+// q 为空表示不过滤（LIKE 模式退化为 "%%"，命中全部）；排序按 name 升序，与 List 一致。
+// limit/offset 的合法性由 api 层校验。
+func (s *Store) ListPaged(ctx context.Context, q string, limit, offset int) ([]Tag, int, error) {
+	pattern := escapeLike(q)
+	var total int
+	if err := s.conn.QueryRow(ctx,
+		"SELECT count(*) FROM tag WHERE name ILIKE '%'||$1||'%'", pattern).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("统计标签数失败: %w", err)
+	}
+
+	rows, err := s.conn.Query(ctx,
+		"SELECT "+tagCols+" FROM tag WHERE name ILIKE '%'||$1||'%' ORDER BY name LIMIT $2 OFFSET $3",
+		pattern, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("查询标签失败: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]Tag, 0)
+	for rows.Next() {
+		t, err := scanTag(rows)
+		if err != nil {
+			return nil, 0, fmt.Errorf("扫描标签失败: %w", err)
+		}
+		out = append(out, *t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
+}
+
+// ListByNames 按名字批量精确取标签（名单由 api 层 trim 去空）；名字不存在直接忽略，
+// 排序按 name 升序。返回条数即命中数。
+func (s *Store) ListByNames(ctx context.Context, names []string) ([]Tag, error) {
+	out := make([]Tag, 0, len(names))
+	if len(names) == 0 {
+		return out, nil
+	}
+
+	rows, err := s.conn.Query(ctx,
+		"SELECT "+tagCols+" FROM tag WHERE name = ANY($1) ORDER BY name", names)
+	if err != nil {
+		return nil, fmt.Errorf("查询标签失败: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		t, err := scanTag(rows)
+		if err != nil {
+			return nil, fmt.Errorf("扫描标签失败: %w", err)
+		}
+		out = append(out, *t)
+	}
+	return out, rows.Err()
+}
+
 // Create 新增标签；name 必填且唯一；bg/fg 留空时按调色板分配（tag 表当前行数 % 4）
 func (s *Store) Create(ctx context.Context, t *Tag) (*Tag, error) {
 	name, err := NormalizeName(t.Name)
