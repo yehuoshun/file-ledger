@@ -1,9 +1,8 @@
 <template>
-  <div class="tag-selector" @click="open = !open" v-click-outside="() => (open = false)">
-    <!-- 已选标签 -->
-    <div class="tag-chips" v-if="modelValue.length || open">
+  <div ref="rootRef" class="tag-selector" @click="open = true">
+    <div class="tag-chips">
       <span
-        v-for="t in modelValue"
+        v-for="t in tags"
         :key="t"
         class="tag-chip"
         :style="{ background: getTagColor(t).bg, color: getTagColor(t).text }"
@@ -14,115 +13,143 @@
       <input
         ref="inputRef"
         v-model="q"
-        :placeholder="modelValue.length ? '' : '添加标签…'"
+        :placeholder="tags.length ? '' : '添加标签…'"
         class="tag-input"
-        @keydown.enter.prevent="createTag"
-        @keydown.backspace="handleBackspace"
+        @keydown="onKeydown"
         @focus="open = true"
+        @click.stop="open = true"
       />
     </div>
-    <div v-else class="tag-placeholder" @click="open = true">
-      添加标签…
-    </div>
 
-    <!-- 下拉面板 -->
-    <div v-if="open" class="tag-dropdown">
-      <div v-if="filteredTags.length === 0 && q" class="tag-dropdown-item create" @click="createTag">
-        创建「{{ q }}」
+    <!-- 下拉面板：点面板内任何地方都不关闭（关闭只看点外部） -->
+    <div v-if="open" class="tag-dropdown" @click.stop>
+      <div v-if="canCreate" class="tag-dropdown-item create" @click="createTag">
+        创建「{{ q.trim() }}」
       </div>
       <div
         v-for="t in filteredTags"
         :key="t"
         class="tag-dropdown-item"
-        :class="{ selected: modelValue.includes(t) }"
+        :class="{ selected: tags.includes(t) }"
         @click="toggle(t)"
       >
         <span class="tag-dot" :style="{ background: getTagColor(t).bg }"></span>
         {{ t }}
-        <span v-if="modelValue.includes(t)" class="check">✓</span>
+        <span v-if="tags.includes(t)" class="check">✓</span>
       </div>
-      <div v-if="filteredTags.length === 0 && !q" class="tag-dropdown-empty">暂无标签</div>
+      <div v-if="!canCreate && !filteredTags.length" class="tag-dropdown-empty">输入新标签后回车创建</div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { tagPool, getTagColor } from '../constants/tags'
 
 const props = defineProps<{ modelValue: string[] }>()
 const emit = defineEmits<{ 'update:modelValue': [v: string[]] }>()
 
+const tags = computed(() => props.modelValue || [])
 const open = ref(false)
 const q = ref('')
-const inputRef = ref<HTMLInputElement>()
+const rootRef = ref<HTMLElement | null>(null)
+const inputRef = ref<HTMLInputElement | null>(null)
 
-// 所有标签（模拟后端池，来自共享 tagPool）
-const allTags = computed(() => [...tagPool.value].sort())
+// 候选 = 共享标签池 + 当前已选（保证已选标签也能在面板里看到并取消）
+const allTags = computed(() =>
+  [...new Set([...tagPool.value, ...tags.value])].sort((a, b) => a.localeCompare(b, 'zh')),
+)
 
 const filteredTags = computed(() => {
-  if (!q.value) return allTags.value
-  const lower = q.value.toLowerCase()
-  return allTags.value.filter((t) => t.toLowerCase().includes(lower))
+  const key = q.value.trim().toLowerCase()
+  const list = allTags.value
+  return key ? list.filter((t) => t.toLowerCase().includes(key)) : list
 })
 
+// 输入了池里没有的新名字 → 面板顶部出现「创建「xxx」」
+const canCreate = computed(() => {
+  const key = q.value.trim()
+  return !!key && !allTags.value.includes(key)
+})
+
+function commit(next: string[]) {
+  emit('update:modelValue', next)
+}
+
 function toggle(t: string) {
-  const current = [...props.modelValue]
-  const idx = current.indexOf(t)
-  if (idx >= 0) current.splice(idx, 1)
-  else current.push(t)
-  emit('update:modelValue', current)
+  const cur = [...tags.value]
+  const i = cur.indexOf(t)
+  if (i >= 0) cur.splice(i, 1)
+  else cur.push(t)
+  commit(cur)
   q.value = ''
+  focusInput()
 }
 
 function remove(t: string) {
-  const current = [...props.modelValue]
-  const idx = current.indexOf(t)
-  if (idx >= 0) current.splice(idx, 1)
-  emit('update:modelValue', current)
+  const cur = [...tags.value]
+  const i = cur.indexOf(t)
+  if (i >= 0) {
+    cur.splice(i, 1)
+    commit(cur)
+  }
 }
 
+// 新建标签：进当前条目，同时登记进共享池（下次可直接下拉选）
 function createTag() {
   const name = q.value.trim()
   if (!name) return
-  const current = [...props.modelValue]
-  if (!current.includes(name)) {
-    current.push(name)
-    emit('update:modelValue', current)
-  }
+  if (!tags.value.includes(name)) commit([...tags.value, name])
+  if (!tagPool.value.includes(name)) tagPool.value.push(name)
   q.value = ''
+  focusInput()
 }
 
-function handleBackspace() {
-  if (!q.value && props.modelValue.length) {
-    remove(props.modelValue[props.modelValue.length - 1])
+// 键盘：回车/逗号建标签；空输入退格删最后一个；ESC 收起。
+// isComposing = 中文输入法还在选词，此时回车交给输入法，别误建标签
+function onKeydown(e: KeyboardEvent) {
+  if (e.isComposing) return
+  if (e.key === 'Enter') {
+    if (!q.value.trim()) return
+    e.preventDefault()
+    createTag()
+    return
   }
+  if (e.key === ',') {
+    if (!q.value.trim()) return
+    e.preventDefault()
+    createTag()
+    return
+  }
+  if (e.key === 'Backspace' && !q.value && tags.value.length) {
+    remove(tags.value[tags.value.length - 1])
+    return
+  }
+  if (e.key === 'Escape') open.value = false
 }
 
-// 打开时聚焦输入框
+function focusInput() {
+  nextTick(() => inputRef.value?.focus())
+}
+
 watch(open, (v) => {
-  if (v) setTimeout(() => inputRef.value?.focus(), 50)
+  if (v) focusInput()
 })
 
-// 点击外部关闭
-const vClickOutside = {
-  mounted(el: HTMLElement, bind: any) {
-    const handler = (e: MouseEvent) => {
-      if (!el.contains(e.target as Node)) bind.value()
-    }
-    ;(el as any)._co = handler
-    document.addEventListener('click', handler)
-  },
-  unmounted(el: HTMLElement) {
-    document.removeEventListener('click', (el as any)._co)
-  },
+// 点外部收起（捕获阶段先判，点面板/输入框内不关闭）
+function onDocClick(e: MouseEvent) {
+  if (!open.value) return
+  if (rootRef.value && !rootRef.value.contains(e.target as Node)) open.value = false
 }
+onMounted(() => document.addEventListener('click', onDocClick, true))
+onUnmounted(() => document.removeEventListener('click', onDocClick, true))
 </script>
 
 <style scoped>
 .tag-selector {
   position: relative;
   min-height: 32px;
+  width: 100%;
   border: 1px solid var(--el-border-color);
   border-radius: 4px;
   padding: 2px 6px;
@@ -162,25 +189,20 @@ const vClickOutside = {
   background: transparent;
   padding: 2px 0;
 }
-.tag-placeholder {
-  color: var(--el-text-color-placeholder);
-  font-size: 13px;
-  padding: 4px 0;
-}
 
 .tag-dropdown {
   position: absolute;
   top: 100%;
   left: 0;
   right: 0;
-  z-index: 100;
+  z-index: 3000;
   background: var(--el-bg-color-overlay);
   border: 1px solid var(--el-border-color);
   border-radius: 4px;
   margin-top: 2px;
   max-height: 200px;
   overflow-y: auto;
-  box-shadow: 0 4px 12px rgba(0,0,0,.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 .tag-dropdown-item {
   padding: 6px 10px;
@@ -194,7 +216,9 @@ const vClickOutside = {
 .tag-dropdown-item.selected { font-weight: 600; }
 .tag-dropdown-item.create { color: var(--el-color-primary); }
 .tag-dot {
-  width: 10px; height: 10px; border-radius: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
   flex-shrink: 0;
 }
 .check { margin-left: auto; color: var(--el-color-primary); }
