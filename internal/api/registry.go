@@ -19,8 +19,14 @@ type RegistryStore interface {
 	Delete(ctx context.Context, id string) error
 }
 
-// RegisterRegistryRoutes 挂载台账 CRUD 路由（Go 1.22+ 方法+路径模式）
-func RegisterRegistryRoutes(mux *http.ServeMux, store RegistryStore) {
+// TagRegistrar 标签登记接口：条目保存前把新标签补进 tag 字典（接口便于 mock；nil = 不登记）
+type TagRegistrar interface {
+	Ensure(ctx context.Context, names []string) error
+}
+
+// RegisterRegistryRoutes 挂载台账 CRUD 路由（Go 1.22+ 方法+路径模式）；
+// tags 非 nil 时，POST/PUT 会先把条目标签登记进字典，再落库。
+func RegisterRegistryRoutes(mux *http.ServeMux, store RegistryStore, tags TagRegistrar) {
 	mux.HandleFunc("GET /api/registry", func(w http.ResponseWriter, r *http.Request) {
 		items, err := store.List(r.Context())
 		if err != nil {
@@ -37,6 +43,11 @@ func RegisterRegistryRoutes(mux *http.ServeMux, store RegistryStore) {
 		}
 		if err := e.Validate(); err != nil {
 			writeError(w, r, http.StatusBadRequest, err.Error(), nil)
+			return
+		}
+		// 先登记标签再落库：字典写不进去就不保存条目，避免出现字典里没有的标签
+		if err := ensureTags(r.Context(), tags, e.Tags); err != nil {
+			writeError(w, r, http.StatusInternalServerError, "登记标签失败", err)
 			return
 		}
 		created, err := store.Create(r.Context(), &e)
@@ -56,6 +67,10 @@ func RegisterRegistryRoutes(mux *http.ServeMux, store RegistryStore) {
 			writeError(w, r, http.StatusBadRequest, err.Error(), nil)
 			return
 		}
+		if err := ensureTags(r.Context(), tags, e.Tags); err != nil {
+			writeError(w, r, http.StatusInternalServerError, "登记标签失败", err)
+			return
+		}
 		updated, err := store.Update(r.Context(), r.PathValue("id"), &e)
 		if err != nil {
 			writeStoreErr(w, r, err)
@@ -71,6 +86,14 @@ func RegisterRegistryRoutes(mux *http.ServeMux, store RegistryStore) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+}
+
+// ensureTags 保存条目之前把标签登记进字典（tags 为 nil 表示不登记，旧调用照常编译）
+func ensureTags(ctx context.Context, tags TagRegistrar, names []string) error {
+	if tags == nil {
+		return nil
+	}
+	return tags.Ensure(ctx, names)
 }
 
 // decodeBody 解析 JSON 请求体；失败时已写好 400 响应

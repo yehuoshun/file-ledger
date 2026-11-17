@@ -88,3 +88,32 @@ BEGIN
             EXECUTE FUNCTION trigger_set_updated_at();
     END IF;
 END $$;
+
+-- tag 标签字典表（2026-11-17：标签由数据库管理，前端不再写死色板）
+-- 条目上的 registry.tags 只存标签名；改名/删除时由后端在同一事务里同步 registry.tags
+CREATE TABLE IF NOT EXISTS tag (
+    id          uuid        PRIMARY KEY DEFAULT uuid_generate_v7(),
+    name        text        NOT NULL,
+    bg          text        NOT NULL DEFAULT '#e4e7ed',
+    fg          text        NOT NULL DEFAULT '#303133',
+    created_at  timestamptz NOT NULL DEFAULT now(),
+
+    CONSTRAINT tag_name_unique UNIQUE (name)
+);
+
+COMMENT ON TABLE tag IS '标签字典表（标签名 + 前景/背景配色，由数据库统一管理）';
+COMMENT ON COLUMN tag.id IS '主键（UUID v7，服务端生成）';
+COMMENT ON COLUMN tag.name IS '标签名，唯一，最长 32 个字符';
+COMMENT ON COLUMN tag.bg IS '背景色（#rrggbb）';
+COMMENT ON COLUMN tag.fg IS '前景色/文字色（#rrggbb）';
+COMMENT ON COLUMN tag.created_at IS '创建时间（自动）';
+
+-- 预置标签（幂等：重跑不覆盖老板改过的颜色）
+INSERT INTO tag (name, bg, fg) VALUES
+    ('工作', '#d4eaff', '#1565c0'),
+    ('重要', '#e6d4f5', '#6a1b9a'),
+    ('娱乐', '#f5e6d0', '#8a5a2a'),
+    ('文档', '#d4eaff', '#1565c0'),
+    ('项目', '#d4eaff', '#1565c0'),
+    ('备份', '#fcedd4', '#8a6d2b')
+ON CONFLICT (name) DO NOTHING;

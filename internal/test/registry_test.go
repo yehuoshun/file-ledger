@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -71,10 +72,30 @@ func (m *mockStore) Delete(_ context.Context, id string) error {
 	return registry.ErrNotFound
 }
 
+// mockRegistrar 内存版 TagRegistrar：记录 Ensure 每次收到的标签名，便于断言归一结果
+type mockRegistrar struct {
+	calls [][]string
+}
+
+func newMockRegistrar() *mockRegistrar {
+	return &mockRegistrar{}
+}
+
+func (m *mockRegistrar) Ensure(_ context.Context, names []string) error {
+	m.calls = append(m.calls, append([]string(nil), names...))
+	return nil
+}
+
 func setup(t *testing.T, store api.RegistryStore) *httptest.Server {
 	t.Helper()
+	return setupWith(t, store, newMockRegistrar())
+}
+
+// setupWith 可注入自定义标签登记 mock（默认用记录型 mockRegistrar）
+func setupWith(t *testing.T, store api.RegistryStore, tags api.TagRegistrar) *httptest.Server {
+	t.Helper()
 	mux := http.NewServeMux()
-	api.RegisterRegistryRoutes(mux, store)
+	api.RegisterRegistryRoutes(mux, store, tags)
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
 	return ts
@@ -161,6 +182,7 @@ func TestValidation(t *testing.T) {
 		{"路径空串", `{"alias":"x","paths":[{"type":"local","path":""}]}`, 400},
 		{"非 JSON", `not-json`, 400},
 		{"文件夹无路径合法", `{"alias":"游戏","isDir":true,"paths":[]}`, 201},
+		{"标签超长", `{"alias":"x","isDir":true,"tags":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"paths":[]}`, 400},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -187,4 +209,47 @@ func TestAliasConflict(t *testing.T) {
 		t.Fatalf("重名 = %d, 期望 409", resp.StatusCode)
 	}
 	resp.Body.Close()
+}
+
+// TestEntrySaveEnsuresTags 保存条目时自动登记标签，且收到的是归一后的标签（trim/去空/去重）
+func TestEntrySaveEnsuresTags(t *testing.T) {
+	reg := newMockRegistrar()
+	ts := setupWith(t, newMockStore(), reg)
+
+	body := `{"alias":"项目文档","isDir":true,"tags":[" 工作 ","","工作","文档"," 文档 "],"paths":[{"type":"local","path":"D:\\docs"}]}`
+	resp := doJSON(t, "POST", ts.URL+"/api/registry", body)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST = %d, 期望 201", resp.StatusCode)
+	}
+	var created registry.Entry
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("解析新增响应失败: %v", err)
+	}
+	resp.Body.Close()
+
+	want := []string{"工作", "文档"}
+	if len(reg.calls) != 1 {
+		t.Fatalf("Ensure 调用次数 = %d, 期望 1", len(reg.calls))
+	}
+	if !slices.Equal(reg.calls[0], want) {
+		t.Fatalf("Ensure 收到 %v, 期望 %v", reg.calls[0], want)
+	}
+	if !slices.Equal(created.Tags, want) {
+		t.Fatalf("新增返回的 tags = %v, 期望 %v", created.Tags, want)
+	}
+
+	// PUT 同样先登记标签
+	resp = doJSON(t, "PUT", ts.URL+"/api/registry/"+created.ID,
+		`{"alias":"项目文档","isDir":true,"tags":[" 重要 ","重要","  "],"paths":[{"type":"mount","path":"Z:"}]}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT = %d, 期望 200", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	if len(reg.calls) != 2 {
+		t.Fatalf("PUT 后 Ensure 调用次数 = %d, 期望 2", len(reg.calls))
+	}
+	if !slices.Equal(reg.calls[1], []string{"重要"}) {
+		t.Fatalf("PUT 后 Ensure 收到 %v, 期望 [重要]", reg.calls[1])
+	}
 }

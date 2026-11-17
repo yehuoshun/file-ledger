@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
+
+	"file-ledger/internal/tag"
 )
 
 // Path 单条路径：type ∈ local|mount|virtual，path 为实际路径/指向
@@ -46,6 +49,25 @@ func (e *Entry) Validate() error {
 	if !e.IsDir && len(e.Paths) == 0 {
 		return fmt.Errorf("文件条目至少需要一条路径")
 	}
+
+	// 标签归一：trim、丢空串、按首次出现去重、单个不超过 tag.MaxNameRunes 个字符
+	normalized := make([]string, 0, len(e.Tags))
+	seen := make(map[string]struct{}, len(e.Tags))
+	for _, raw := range e.Tags {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		if utf8.RuneCountInString(name) > tag.MaxNameRunes {
+			return fmt.Errorf("标签 %q 过长（最长 %d 个字符）", name, tag.MaxNameRunes)
+		}
+		if _, dup := seen[name]; dup {
+			continue
+		}
+		seen[name] = struct{}{}
+		normalized = append(normalized, name)
+	}
+	e.Tags = normalized
 
 	for i, p := range e.Paths {
 		p.Type = strings.TrimSpace(p.Type)

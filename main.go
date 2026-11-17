@@ -22,6 +22,7 @@ import (
 	"file-ledger/internal/db"
 	"file-ledger/internal/logx"
 	"file-ledger/internal/registry"
+	"file-ledger/internal/tag"
 )
 
 //go:embed web/dist
@@ -120,9 +121,11 @@ func main() {
 
 	// 3. 挂路由
 	store := registry.NewStore(conn)
+	tagStore := tag.NewStore(conn)
 	mux := http.NewServeMux()
-	api.RegisterRegistryRoutes(mux, store)
-	api.RegisterFSRoutes(mux) // 步骤4 目录浏览（只读）
+	api.RegisterTagRoutes(mux, tagStore)             // 标签字典（由数据库管理）
+	api.RegisterRegistryRoutes(mux, store, tagStore) // 条目保存时自动登记标签
+	api.RegisterFSRoutes(mux)                        // 步骤4 目录浏览（只读）
 	mux.Handle("/", SPAHandler())
 
 	// 请求日志中间件（只记 /api/*）
