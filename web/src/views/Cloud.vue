@@ -1,32 +1,12 @@
 <template>
   <div class="cloud-layout">
     <!-- 左侧：文件夹树 -->
-    <aside class="tree-panel">
-      <div class="tree-header">
-        <span class="tree-title">虚拟网盘</span>
-        <el-button link type="primary" size="small" @click="openAdd(null)">+ 新建文件夹</el-button>
-      </div>
-      <el-tree
-        ref="treeRef"
-        :data="treeData"
-        node-key="id"
-        :props="{ label: 'alias', children: 'children' }"
-        default-expand-all
-        highlight-current
-        @node-click="onNodeClick"
-      />
-      <div v-if="!treeData.length" class="tree-empty muted">还没有文件夹，点「+ 新建文件夹」</div>
-    </aside>
+    <FolderTreePanel ref="treeRef" :data="treeData" @select="enterFolder" @add="openAdd(null)" />
 
     <!-- 右侧：当前文件夹内容 -->
     <main class="content-panel">
       <div class="toolbar">
-        <el-breadcrumb separator="/">
-          <el-breadcrumb-item v-for="(b, i) in breadcrumbs" :key="b.id ?? 'root'">
-            <a v-if="i < breadcrumbs.length - 1" @click="currentFolder = b.id">{{ b.label }}</a>
-            <span v-else>{{ b.label }}</span>
-          </el-breadcrumb-item>
-        </el-breadcrumb>
+        <FolderBreadcrumbs :crumbs="breadcrumbs" @navigate="enterFolder" />
 
         <div class="toolbar-actions">
           <el-select v-model="dirFilter" placeholder="类型" clearable size="default" style="width: 110px">
@@ -46,134 +26,25 @@
         </div>
       </div>
 
-      <el-table
-        v-loading="loading"
-        :data="filtered"
-        stripe
-        highlight-current-row
-        style="width: 100%"
-        empty-text="空文件夹，点右上角「+ 新增」添加条目"
+      <EntryTable
+        :rows="filtered"
+        :loading="loading"
         @row-dblclick="onRowDblclick"
-      >
-        <el-table-column label="名字" min-width="140">
-          <template #default="{ row }">
-            <span v-if="row.isDir" class="dir-name">📁 {{ row.alias }}</span>
-            <span v-else>📄 {{ row.alias }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="路径" min-width="320">
-          <template #default="{ row }">
-            <div class="path-tags">
-              <span v-for="(p, i) in row.paths" :key="i" class="path-item">
-                <el-tag :type="PATH_TYPE_TAG[p.type]" size="small" class="path-tag">
-                  {{ PATH_TYPE_LABEL[p.type] }} {{ p.path }}
-                </el-tag>
-                <el-button
-                  v-if="canBrowse(p)"
-                  link
-                  type="primary"
-                  size="small"
-                  :icon="FolderOpened"
-                  class="browse-btn"
-                  @click.stop="openBrowser(p.path)"
-                >
-                  浏览
-                </el-button>
-              </span>
-              <span v-if="!row.paths?.length" class="muted">--</span>
-            </div>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="大小" width="90" align="right">
-          <template #default="{ row }">
-            <span>{{ row.size || '--' }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="标签" min-width="140">
-          <template #default="{ row }">
-            <span v-for="t in row.tags" :key="t" class="tag-chip colored" :style="getTagColor(t)">{{ t }}</span>
-            <span v-if="!row.tags?.length" class="muted">--</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="描述" prop="note" min-width="120" show-overflow-tooltip />
-
-        <el-table-column label="操作" width="100" fixed="right">
-          <template #default="{ row }">
-            <el-button link size="small" @click="openEdit(row)">编辑</el-button>
-            <el-button link size="small" type="danger" @click="handleDelete(row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+        @edit="openEdit"
+        @delete="handleDelete"
+        @browse="openBrowser"
+      />
     </main>
 
     <!-- 新增/编辑弹窗 -->
-    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="560" :close-on-click-modal="false">
-      <el-form :model="form" label-width="90">
-        <el-form-item label="名字" required>
-          <el-input v-model="form.alias" placeholder="例如：游戏、config.yaml" />
-        </el-form-item>
-
-        <el-form-item label="类型" required>
-          <el-radio-group v-model="form.isDir" :disabled="editingId !== null">
-            <el-radio :value="true">文件夹</el-radio>
-            <el-radio :value="false">文件</el-radio>
-          </el-radio-group>
-          <span v-if="editingId !== null" class="muted" style="margin-left: 8px">创建后不可改</span>
-        </el-form-item>
-
-        <el-form-item label="所属文件夹">
-          <!-- 用扁平「层级路径」下拉，不用树选择器：树里点一下就选中，极易误触（老板 2026-11-17 反馈） -->
-          <el-select
-            v-model="form.parentId"
-            filterable
-            clearable
-            placeholder="不选 = 顶层（虚拟网盘根）"
-            style="width: 100%"
-            no-data-text="还没有文件夹"
-          >
-            <el-option v-for="o in folderOptions" :key="o.id" :label="o.label" :value="o.id" />
-          </el-select>
-        </el-form-item>
-
-        <!-- 文件夹=纯分类容器，不再经表单填指向/路径（定版 2026-11-07）；存量已填的编辑时原样保留 -->
-        <template v-if="!form.isDir">
-          <el-form-item label="路径" required>
-            <div class="path-list">
-              <div v-for="(p, i) in form.paths" :key="i" class="path-row">
-                <el-select v-model="p.type" style="width: 100px">
-                  <el-option v-for="o in PATH_TYPE_OPTIONS" :key="o.value" :value="o.value" :label="o.label" />
-                </el-select>
-                <el-input v-model="p.path" :placeholder="p.type === 'virtual' ? 'ali:docs 或 https://…' : 'D:\\docs'" style="flex: 1" />
-                <el-button v-if="form.paths.length > 1" link type="danger" @click="removePath(i)">×</el-button>
-              </div>
-            </div>
-            <el-button text size="small" @click="addPath">+ 添加备份路径</el-button>
-          </el-form-item>
-        </template>
-
-        <!-- 大小：仅文件条目手填；文件夹大小是计算式（子条目合计），不在此填 -->
-        <el-form-item v-if="!form.isDir" label="大小">
-          <el-input v-model="form.size" placeholder="例如：1.2 GB" style="width: 200px" />
-        </el-form-item>
-
-        <el-form-item label="标签">
-          <TagSelector v-model="form.tags" />
-        </el-form-item>
-
-        <el-form-item label="描述">
-          <el-input v-model="form.note" type="textarea" :rows="2" placeholder="备忘信息（可选）" />
-        </el-form-item>
-      </el-form>
-
-      <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleSave">保存</el-button>
-      </template>
-    </el-dialog>
+    <EntryDialog
+      v-model="dialogVisible"
+      :mode="dialogMode"
+      :entry="editingEntry"
+      :default-parent-id="defaultParentId"
+      :folder-options="folderOpts"
+      @submit="onDialogSubmit"
+    />
 
     <!-- 目录浏览器（步骤4）：从台账路径只读浏览本地目录 -->
     <DirBrowser v-model="browserVisible" :path="browserPath" />
@@ -181,107 +52,31 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { FolderOpened } from '@element-plus/icons-vue'
-import TagSelector from '../components/TagSelector.vue'
+import FolderTreePanel from '../components/cloud/FolderTreePanel.vue'
+import FolderBreadcrumbs from '../components/cloud/FolderBreadcrumbs.vue'
+import EntryTable from '../components/cloud/EntryTable.vue'
+import EntryDialog from '../components/cloud/EntryDialog.vue'
 import DirBrowser from '../components/DirBrowser.vue'
-import { getTagColor } from '../constants/tags'
-import { PATH_TYPE_LABEL, PATH_TYPE_TAG, PATH_TYPE_OPTIONS } from '../constants/pathTypes'
-import { listEntries, createEntry, updateEntry, deleteEntry, type Entry, type EntryForm, type Path, type PathType } from '../api'
+import { useEntries } from '../composables/useEntries'
+import { useFolderTree } from '../composables/useFolderTree'
+import { canBrowsePath } from '../utils/paths'
+import type { Entry, EntryForm } from '../api'
 
-// ── 数据（真实 API，全量加载 → 前端组树）──
-const entries = ref<Entry[]>([])
-const loading = ref(false)
+// ── 数据与派生（全部逻辑在 composable 里，本组件只做编排）──
+const { entries, loading, reload, save, remove } = useEntries()
+const { pid, treeData, countDescendants, folderOptions } = useFolderTree(entries)
+onMounted(reload)
 
-async function loadEntries() {
-  loading.value = true
-  try {
-    entries.value = await listEntries()
-  } catch (e: any) {
-    ElMessage.error(e.message || '加载台账失败')
-  } finally {
-    loading.value = false
-  }
-}
-onMounted(loadEntries)
-
-const pid = (e: Entry | null | undefined) => (e?.parentId ?? null)
-
-// ── 左侧树 ──
-interface TreeNode {
-  id: string
-  alias: string
-  children: TreeNode[]
-}
-
-function buildTree(parentId: string | null): TreeNode[] {
-  return entries.value
-    .filter((e) => e.isDir && pid(e) === parentId)
-    .map((e) => ({ id: e.id, alias: e.alias, children: buildTree(e.id) }))
-}
-
-const treeData = computed(() => buildTree(null))
-
-// 所属文件夹下拉的选项：扁平「层级路径」（开发环境 / 数据库），比树选择器不容易误触。
-// 编辑文件夹时排除自己与自己的子孙，避免把文件夹挂进自己的子树里。
-function isDescendantOf(id: string, ancestorId: string): boolean {
-  let cur = entries.value.find((e) => e.id === id)
-  while (cur?.parentId) {
-    if (cur.parentId === ancestorId) return true
-    cur = entries.value.find((e) => e.id === cur!.parentId)
-  }
-  return false
-}
-
-const folderOptions = computed(() => {
-  const out: { id: string; label: string }[] = []
-  const walk = (parent: string | null, prefix: string) => {
-    const kids = entries.value
-      .filter((e) => e.isDir && pid(e) === parent)
-      .sort((a, b) => a.alias.localeCompare(b.alias, 'zh'))
-    for (const k of kids) {
-      if (editingId.value && (k.id === editingId.value || isDescendantOf(k.id, editingId.value))) continue
-      const label = prefix ? `${prefix} / ${k.alias}` : k.alias
-      out.push({ id: k.id, label })
-      walk(k.id, label)
-    }
-  }
-  walk(null, '')
-  return out
-})
-
+// ── 当前文件夹与树高亮 ──
 const currentFolder = ref<string | null>(null)
-
-// 左侧树的实例：进入文件夹时同步高亮，避免「列表已经在里面、树还停在原处」
-const treeRef = ref<{ setCurrentKey: (key: string | null) => void } | null>(null)
+const treeRef = ref<InstanceType<typeof FolderTreePanel> | null>(null)
 
 // 进入某个文件夹（Windows 语义：双击文件夹 = 进入）；id 为 null 表示回到顶层
 function enterFolder(id: string | null) {
   currentFolder.value = id
   if (id) nextTick(() => treeRef.value?.setCurrentKey(id))
-}
-
-function onNodeClick(node: TreeNode) {
-  enterFolder(node.id)
-}
-
-// 双击行：文件夹 → 进入；文件 → 能浏览的直接打开所在目录，虚拟路径只提示（复制/跳转是步骤5）
-function onRowDblclick(row: Entry) {
-  if (row.isDir) {
-    enterFolder(row.id)
-    return
-  }
-  const browsable = (row.paths || []).find((p) => canBrowse(p))
-  if (browsable) {
-    openBrowser(browsable.path)
-    return
-  }
-  if (row.paths?.length) {
-    ElMessage.info('虚拟路径暂不支持双击打开，步骤 5 会做成复制路径 / 跳转链接')
-  } else {
-    ElMessage.warning('这条没有路径，无法打开')
-  }
 }
 
 // ── 面包屑 ──
@@ -321,132 +116,67 @@ const filtered = computed(() => {
   )
 })
 
-// ── dialog ──
-const dialogVisible = ref(false)
-const dialogTitle = ref('')
-const editingId = ref<string | null>(null)
-
-const form = reactive({
-  alias: '',
-  parentId: null as string | null,
-  isDir: true,
-  size: '',
-  note: '',
-  tags: [] as string[],
-  dirType: 'virtual' as PathType,
-  dirPath: '',
-  paths: [{ type: 'local' as PathType, path: '' }],
-})
-
-function resetForm() {
-  form.alias = ''
-  form.parentId = null
-  form.isDir = true
-  form.size = ''
-  form.note = ''
-  form.tags = []
-  form.paths = [{ type: 'local', path: '' }]
-  form.dirType = 'virtual'
-  form.dirPath = ''
-  editingId.value = null
+// ── 双击行：文件夹 → 进入；文件 → 能浏览的直接打开所在目录，虚拟路径只提示（复制/跳转是步骤5）──
+function onRowDblclick(row: Entry) {
+  if (row.isDir) {
+    enterFolder(row.id)
+    return
+  }
+  const browsable = (row.paths || []).find((p) => canBrowsePath(p.type, p.path))
+  if (browsable) {
+    openBrowser(browsable.path)
+    return
+  }
+  if (row.paths?.length) {
+    ElMessage.info('虚拟路径暂不支持双击打开，步骤 5 会做成复制路径 / 跳转链接')
+  } else {
+    ElMessage.warning('这条没有路径，无法打开')
+  }
 }
 
+// ── 新增/编辑弹窗 ──
+const dialogVisible = ref(false)
+const dialogMode = ref<'create' | 'edit'>('create')
+const editingEntry = ref<Entry | null>(null)
+const defaultParentId = ref<string | null>(null)
+
+// 所属文件夹下拉：编辑时排除自身与子孙，避免把文件夹挂进自己的子树
+const folderOpts = computed(() => folderOptions(editingEntry.value?.id ?? null))
+
 function openAdd(parent: string | null) {
-  resetForm()
-  form.parentId = parent
-  dialogTitle.value = '新增'
+  editingEntry.value = null
+  defaultParentId.value = parent
+  dialogMode.value = 'create'
   dialogVisible.value = true
 }
 
 function openEdit(entry: Entry) {
-  editingId.value = entry.id
-  form.alias = entry.alias
-  form.parentId = pid(entry)
-  form.isDir = entry.isDir
-  form.size = entry.size || ''
-  form.note = entry.note || ''
-  form.tags = [...(entry.tags || [])]
-  if (entry.isDir) {
-    form.dirType = entry.paths[0]?.type || 'virtual'
-    form.dirPath = entry.paths[0]?.path || ''
-  } else {
-    form.paths = entry.paths.map((p) => ({ type: p.type, path: p.path }))
-  }
-  dialogTitle.value = '编辑'
+  editingEntry.value = entry
+  defaultParentId.value = null
+  dialogMode.value = 'edit'
   dialogVisible.value = true
 }
 
-function addPath() {
-  form.paths.push({ type: 'local' as PathType, path: '' })
-}
-
-function removePath(i: number) {
-  form.paths.splice(i, 1)
-}
-
-async function handleSave() {
-  if (!form.alias) { ElMessage.warning('名字不能为空'); return }
-  let paths
-  if (form.isDir) {
-    // 文件夹=纯分类容器（定版 2026-11-07）：表单不再提供指向/路径输入。
-    // 编辑存量带路径的文件夹时 openEdit 已把 paths[0] 回填进 dirType/dirPath，
-    // 这里用它原样保留（用户不可改，但不会被误清空）。
-    paths = form.dirPath.trim() ? [{ type: form.dirType, path: form.dirPath.trim() }] : []
-  } else {
-    paths = form.paths.filter((p) => p.path.trim())
-    if (!paths.length) { ElMessage.warning('文件至少填一条路径'); return }
-  }
-
-  const entry: EntryForm = {
-    alias: form.alias,
-    parentId: form.parentId || null,
-    isDir: form.isDir,
-    size: form.isDir ? '' : form.size || '',
-    note: form.note,
-    tags: [...form.tags],
-    paths: paths.map((p) => ({ type: p.type as PathType, path: p.path })),
-  }
-
+async function onDialogSubmit(form: EntryForm) {
+  const isEdit = !!editingEntry.value
   try {
-    if (editingId.value) {
-      await updateEntry(editingId.value, entry)
-      ElMessage.success('已更新')
-    } else {
-      await createEntry(entry)
-      ElMessage.success('已新增')
-    }
+    await save(editingEntry.value?.id ?? null, form)
+    ElMessage.success(isEdit ? '已更新' : '已新增')
     dialogVisible.value = false
-    await loadEntries()
   } catch (e: any) {
     ElMessage.error(e.message || '保存失败')
   }
 }
 
 // ── 删除：文件夹级联删子（Windows 语义），确认框提示子条目数 ──
-function countDescendants(id: string): number {
-  let n = 0
-  const stack = [id]
-  while (stack.length) {
-    const p = stack.pop()!
-    for (const e of entries.value) {
-      if (pid(e) === p) {
-        n++
-        if (e.isDir) stack.push(e.id)
-      }
-    }
-  }
-  return n
-}
-
 async function handleDelete(row: Entry) {
   const extra = row.isDir ? countDescendants(row.id) : 0
   const tip = extra > 0 ? `，将同时删除其下 ${extra} 个子条目` : ''
   try {
     await ElMessageBox.confirm(`确定删除「${row.alias}」？${tip}`, '确认', { type: 'warning' })
-    await deleteEntry(row.id)
+    await remove(row.id)
     ElMessage.success('已删除')
-    if (currentFolder.value === row.id) currentFolder.value = null
-    await loadEntries()
+    if (currentFolder.value === row.id) enterFolder(null)
   } catch (e: any) {
     if (e === 'cancel' || e === 'close') return // 用户取消
     ElMessage.error(e.message || '删除失败')
@@ -456,12 +186,6 @@ async function handleDelete(row: Entry) {
 // ── 目录浏览器（步骤4）：从台账路径只读浏览本地目录 ──
 const browserVisible = ref(false)
 const browserPath = ref('')
-
-// 只有本地/挂载的盘符绝对路径能浏览；虚拟路径（ali:… / https:…）不在本功能范围内
-function canBrowse(p: Path) {
-  const v = (p.path || '').trim()
-  return p.type !== 'virtual' && /^[A-Za-z]:[\\/]/.test(v)
-}
 
 function openBrowser(path: string) {
   browserPath.value = path
@@ -474,27 +198,6 @@ function openBrowser(path: string) {
   display: flex;
   gap: 16px;
   height: 100%;
-}
-.tree-panel {
-  width: 220px;
-  flex-shrink: 0;
-  border-right: 1px solid var(--el-border-color-light);
-  padding-right: 12px;
-  overflow: auto;
-}
-.tree-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-.tree-title {
-  font-weight: 600;
-  font-size: 14px;
-}
-.tree-empty {
-  font-size: 12px;
-  padding: 8px 0;
 }
 .content-panel {
   flex: 1;
@@ -514,16 +217,4 @@ function openBrowser(path: string) {
   gap: 8px;
 }
 .search-input { width: 180px; }
-.dir-name { font-weight: 500; }
-.path-tags { display: flex; flex-wrap: wrap; gap: 4px; }
-.path-item { display: inline-flex; align-items: center; gap: 2px; }
-.path-tag { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.browse-btn { padding: 0 2px; }
-.tag-chip { margin-right: 4px; display: inline-block; }
-.tag-chip.colored { padding: 1px 6px; border-radius: 3px; font-size: 12px; margin-right: 4px; }
-.muted { color: var(--el-text-color-placeholder); font-size: 12px; }
-.field-hint { margin-top: 4px; }
-
-.path-list { display: flex; flex-direction: column; gap: 8px; }
-.path-row { display: flex; gap: 8px; align-items: center; }
 </style>
