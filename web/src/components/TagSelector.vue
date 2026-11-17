@@ -27,7 +27,7 @@
         创建「{{ q.trim() }}」
       </div>
       <div
-        v-for="t in filteredTags"
+        v-for="t in candidates"
         :key="t"
         class="tag-dropdown-item"
         :class="{ selected: tags.includes(t) }"
@@ -37,7 +37,7 @@
         {{ t }}
         <span v-if="tags.includes(t)" class="check">✓</span>
       </div>
-      <div v-if="!canCreate && !filteredTags.length" class="tag-dropdown-empty">输入新标签后回车创建</div>
+      <div v-if="!canCreate && !candidates.length" class="tag-dropdown-empty">输入新标签后回车创建</div>
     </div>
   </div>
 </template>
@@ -45,35 +45,62 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useTags } from '../composables/useTags'
+import type { Tag } from '../api'
 
-// 标签选择器：候选池与颜色都来自后端标签字典（composable 单例），组件自己不发请求
+// 标签选择器：候选池按关键字向后端标签字典现查（composable 单例），组件自己不管取数细节。
+// 字典可能有上千条，不预加载全表；已选标签总是并入候选，保证已选也能取消。
 const props = defineProps<{ modelValue: string[] }>()
 const emit = defineEmits<{ 'update:modelValue': [v: string[]] }>()
 
-const { tagNames, colorOf, addTag, reload: reloadTags } = useTags()
+const { colorOf, searchTags, addTag, invalidate, ensureColors } = useTags()
 
 const tags = computed(() => props.modelValue || [])
 const open = ref(false)
 const q = ref('')
+const options = ref<Tag[]>([])
 const rootRef = ref<HTMLElement | null>(null)
 const inputRef = ref<HTMLInputElement | null>(null)
 
-// 候选 = 字典里的标签 + 当前已选（保证已选标签也能在面板里看到并取消）
-const allTags = computed(() =>
-  [...new Set([...tagNames.value, ...tags.value])].sort((a, b) => a.localeCompare(b, 'zh')),
-)
+// 输入防抖 300ms 再查；seq 只认最后一次请求，避免旧响应盖掉新结果
+const SEARCH_DEBOUNCE = 300
+const SEARCH_SIZE = 20
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+let searchSeq = 0
 
-const filteredTags = computed(() => {
-  const key = q.value.trim().toLowerCase()
-  const list = allTags.value
-  return key ? list.filter((t) => t.toLowerCase().includes(key)) : list
+// 候选 = 后端搜索到的标签 + 当前已选（已选即使不在前 N 条里也要能取消）
+const candidates = computed(() => {
+  const names = new Set(options.value.map((t) => t.name))
+  for (const t of tags.value) names.add(t)
+  return [...names].sort((a, b) => a.localeCompare(b, 'zh'))
 })
 
-// 输入了池里没有的新名字 → 面板顶部出现「创建「xxx」」
+// 输入了候选里没有的新名字 → 面板顶部出现「创建「xxx」」
 const canCreate = computed(() => {
   const key = q.value.trim()
-  return !!key && !allTags.value.includes(key)
+  return !!key && !candidates.value.includes(key)
 })
+
+async function loadOptions(keyword: string) {
+  const seq = ++searchSeq
+  const items = await searchTags(keyword, SEARCH_SIZE)
+  if (seq !== searchSeq) return
+  options.value = items
+}
+
+function cancelSearch() {
+  if (searchTimer !== undefined) {
+    clearTimeout(searchTimer)
+    searchTimer = undefined
+  }
+}
+
+function scheduleOptions(keyword: string) {
+  cancelSearch()
+  searchTimer = setTimeout(() => {
+    searchTimer = undefined
+    loadOptions(keyword)
+  }, SEARCH_DEBOUNCE)
+}
 
 function commit(next: string[]) {
   emit('update:modelValue', next)
@@ -99,8 +126,8 @@ function remove(t: string) {
 }
 
 // 新建标签：先进当前条目（本地立即生效），再 best-effort 登记进后端字典。
-// 409 = 后端已有同名标签，忽略即可；其他失败也只刷新候选池，不打断录入
-// （保存条目时后端会自动补登记，所以这里失败不影响落库）。
+// 409 = 后端已有同名标签，此时把它的真实颜色补回来即可；其他失败只记录在 composable 上，
+// 不打断录入（保存条目时后端会自动补登记，所以这里失败不影响落库）。
 async function createTag() {
   const name = q.value.trim()
   if (!name) return
@@ -110,7 +137,9 @@ async function createTag() {
   try {
     await addTag(name)
   } catch {
-    await reloadTags()
+    invalidate([name])
+    ensureColors([name])
+    loadOptions('')
   }
 }
 
@@ -141,11 +170,15 @@ function focusInput() {
   nextTick(() => inputRef.value?.focus())
 }
 
-// 面板打开时刷新候选池（单例内部会合并并发请求，重开不会堆请求）
+// 输入变化：防抖后按关键字查候选
+watch(q, (v) => scheduleOptions(v.trim()))
+
+// 面板打开时立刻取一次候选（输入框常驻；空输入就是前 N 条）
 watch(open, (v) => {
   if (!v) return
   focusInput()
-  reloadTags()
+  cancelSearch()
+  loadOptions(q.value.trim())
 })
 
 // 点外部收起（捕获阶段先判，点面板/输入框内不关闭）
@@ -154,7 +187,10 @@ function onDocClick(e: MouseEvent) {
   if (rootRef.value && !rootRef.value.contains(e.target as Node)) open.value = false
 }
 onMounted(() => document.addEventListener('click', onDocClick, true))
-onUnmounted(() => document.removeEventListener('click', onDocClick, true))
+onUnmounted(() => {
+  cancelSearch()
+  document.removeEventListener('click', onDocClick, true)
+})
 </script>
 
 <style scoped>

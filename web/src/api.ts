@@ -88,7 +88,10 @@ export function listDir(path: string): Promise<FsListing> {
 }
 
 // ── 标签字典（标签后端化）──
-// 后端 GET/POST/PUT/DELETE /api/tags；重名 409（{"error":"标签已存在"}）由 request() 抛成 Error。
+// 后端 GET /api/tags 一个接口两种用法，都返回 {items,total}：
+//   分页/搜索：?q=&limit=&offset=（limit 默认 50，最大 200）
+//   批量精确取：?names=a,b,c（≤100 个名字）
+// 重名 409（{"error":"标签已存在"}）由 request() 抛成 Error。
 // 保存条目时后端会自动把没见过的标签名登记进字典，所以表单里直接填新标签也能落库。
 
 export interface Tag {
@@ -106,10 +109,30 @@ export interface TagInput {
   fg?: string
 }
 
+// 列表/批量取色的统一响应
+export interface TagPage {
+  items: Tag[]
+  total: number
+}
+
+export interface TagQuery {
+  q?: string
+  limit?: number
+  offset?: number
+  names?: string[]
+}
+
 const TAGS_BASE = '/api/tags'
 
-export function listTags(): Promise<Tag[]> {
-  return request<Tag[]>(TAGS_BASE)
+export function listTags(params: TagQuery = {}): Promise<TagPage> {
+  const qs = new URLSearchParams()
+  if (params.q?.trim()) qs.set('q', params.q.trim())
+  if (params.names?.length) qs.set('names', params.names.join(','))
+  if (params.limit !== undefined) qs.set('limit', String(params.limit))
+  if (params.offset !== undefined) qs.set('offset', String(params.offset))
+  const suffix = qs.toString()
+  const url = suffix ? TAGS_BASE + '?' + suffix : TAGS_BASE
+  return request<TagPage>(url)
 }
 
 export function createTag(input: TagInput & { name: string }): Promise<Tag> {

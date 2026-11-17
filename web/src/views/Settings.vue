@@ -39,16 +39,26 @@
       <span class="form-hint">左＝背景色，右＝文字色（可不选）</span>
     </div>
 
+    <!-- 标签可能有上千条：列表走服务端分页，顶部按名字搜索（防抖） -->
+    <div class="tag-toolbar">
+      <el-input
+        v-model="keyword"
+        placeholder="按名字搜索标签…"
+        clearable
+        style="width: 240px"
+      />
+    </div>
+
     <el-table
       v-loading="loading"
-      :data="tags"
+      :data="items"
       stripe
-      empty-text="还没有标签，输入名字后点「添加」"
+      empty-text="没有匹配的标签"
       style="width: 100%"
     >
       <el-table-column label="标签" min-width="160">
         <template #default="{ row }">
-          <span class="tag-chip" :style="{ background: colorOf(row.name).bg, color: colorOf(row.name).fg }">
+          <span class="tag-chip" :style="{ background: row.bg, color: row.fg }">
             {{ row.name }}
           </span>
         </template>
@@ -84,11 +94,24 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <div class="tag-pager">
+      <el-pagination
+        v-model:current-page="page"
+        v-model:page-size="pageSize"
+        :total="total"
+        :page-sizes="[10, 20, 50, 100]"
+        layout="total, sizes, prev, pager, next"
+        background
+        @current-change="onPageChange"
+        @size-change="onSizeChange"
+      />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useTags } from '../composables/useTags'
 import type { Tag } from '../api'
@@ -98,13 +121,24 @@ const form = ref({
   defaultDrive: 'Z:',
 })
 
-// 标签管理：取数与写操作都在 useTags（单例），页面只做编排与提示
-const { tags, loading, colorOf, reload, addTag, renameTag, recolorTag, removeTag } = useTags()
+// 标签管理：取数与写操作都在 useTags（单例），页面只做分页/搜索编排与提示
+const { fetchPage, addTag, renameTag, recolorTag, removeTag } = useTags()
+
+// 服务端分页 + 按名字搜索：只持有当前页数据，不在前端拼全表
+const items = ref<Tag[]>([])
+const total = ref(0)
+const page = ref(1)
+const pageSize = ref(20)
+const keyword = ref('')
+const loading = ref(false)
+
+const SEARCH_DEBOUNCE = 300
+let searchTimer: ReturnType<typeof setTimeout> | undefined
 
 const newName = ref('')
 const newBg = ref<string | null>(null)
 const newFg = ref<string | null>(null)
-// 重命名草稿：按 id 存，避免直接改动字典里的对象（失败时列表要显示原值）
+// 重命名草稿：按 id 存，避免直接改动列表里的对象（失败时列表要显示原值）
 const drafts = reactive<Record<string, string>>({})
 
 // 颜色默认值（清空色板时回到它，与 composable 的兜底色一致）
@@ -116,9 +150,48 @@ function errText(e: unknown, fallback = '操作失败'): string {
   return msg || fallback
 }
 
-onMounted(() => {
-  reload()
+async function load() {
+  loading.value = true
+  try {
+    let data = await fetchPage(keyword.value, page.value, pageSize.value)
+    // 删掉当前页最后一条时页码会越界：退到最后一页再取一次
+    const maxPage = Math.max(1, Math.ceil(data.total / pageSize.value))
+    if (page.value > maxPage) {
+      page.value = maxPage
+      data = await fetchPage(keyword.value, page.value, pageSize.value)
+    }
+    items.value = data.items
+    total.value = data.total
+  } catch (e) {
+    ElMessage.error(errText(e, '加载标签失败'))
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(load)
+onUnmounted(() => {
+  if (searchTimer !== undefined) clearTimeout(searchTimer)
 })
+
+// 搜索防抖：改关键字回到第一页再查
+watch(keyword, () => {
+  if (searchTimer !== undefined) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    searchTimer = undefined
+    page.value = 1
+    load()
+  }, SEARCH_DEBOUNCE)
+})
+
+function onPageChange() {
+  load()
+}
+
+function onSizeChange() {
+  page.value = 1
+  load()
+}
 
 async function onAdd() {
   const name = newName.value.trim()
@@ -128,6 +201,7 @@ async function onAdd() {
     newName.value = ''
     newBg.value = null
     newFg.value = null
+    await load()
   } catch (e) {
     // 409 重名 → 后端返回「标签已存在」
     ElMessage.error(errText(e, '新增标签失败'))
@@ -145,6 +219,7 @@ async function commitRename(row: Tag) {
   try {
     await renameTag(row.id, name)
     delete drafts[row.id]
+    await load()
   } catch (e) {
     ElMessage.error(errText(e, '重命名失败'))
   }
@@ -156,6 +231,7 @@ async function onRecolor(row: Tag, bg: string | null, fg: string | null) {
   if (nextBg === row.bg && nextFg === row.fg) return
   try {
     await recolorTag(row.id, nextBg, nextFg)
+    await load()
   } catch (e) {
     ElMessage.error(errText(e, '修改颜色失败'))
   }
@@ -174,6 +250,7 @@ async function onDelete(row: Tag) {
   try {
     await removeTag(row.id)
     delete drafts[row.id]
+    await load()
   } catch (e) {
     ElMessage.error(errText(e, '删除标签失败'))
   }
@@ -207,6 +284,17 @@ async function onDelete(row: Tag) {
   align-items: center;
   gap: 8px;
   margin-bottom: 12px;
+}
+.tag-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.tag-pager {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
 }
 .tag-chip {
   display: inline-block;

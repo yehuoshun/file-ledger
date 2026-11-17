@@ -64,7 +64,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { watch } from 'vue'
 import { FolderOpened } from '@element-plus/icons-vue'
 import { PATH_TYPE_LABEL, PATH_TYPE_TAG } from '../../constants/pathTypes'
 import { useTags } from '../../composables/useTags'
@@ -72,7 +72,7 @@ import { canBrowsePath } from '../../utils/paths'
 import type { Entry } from '../../api'
 
 // 台账列表：只负责展示与抛事件，双击/编辑/删除/浏览都由父级处理
-defineProps<{ rows: Entry[]; loading: boolean }>()
+const props = defineProps<{ rows: Entry[]; loading: boolean }>()
 
 const emit = defineEmits<{
   'row-dblclick': [Entry]
@@ -85,12 +85,21 @@ function onRowDblclick(row: Entry) {
   emit('row-dblclick', row)
 }
 
-// 标签颜色来自后端字典（composable 单例）：表格直接渲染颜色，进页面时若还没拉过就补一次
-const { colorOf, loaded, reload } = useTags()
+// 标签颜色不预加载整本字典（可能上千条）：只把表格里出现过的标签名按需批量取一次，
+// 缓存是模块级单例，多次渲染/多组件共享；取到前先渲染兜底灰。
+const { colorOf, ensureColors } = useTags()
 
-onMounted(() => {
-  if (!loaded.value) reload()
-})
+watch(
+  () => props.rows,
+  (rows) => {
+    const names: string[] = []
+    for (const row of rows) {
+      for (const t of row.tags || []) names.push(t)
+    }
+    ensureColors(names)
+  },
+  { immediate: true },
+)
 
 function tagStyle(name: string) {
   const c = colorOf(name)
