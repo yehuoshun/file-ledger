@@ -10,18 +10,19 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"file-ledger/internal/db"
 	"file-ledger/internal/logx"
 )
 
 var slog = logx.New("tag")
 
-// Store 标签字典存储：pgx 连接
+// Store 标签字典存储：并发安全的连接包装（pgx.Conn 本身不支持并发，见 internal/db/conn.go）
 type Store struct {
-	conn *pgx.Conn
+	conn *db.Conn
 }
 
 // NewStore 创建标签存储
-func NewStore(conn *pgx.Conn) *Store {
+func NewStore(conn *db.Conn) *Store {
 	return &Store{conn: conn}
 }
 

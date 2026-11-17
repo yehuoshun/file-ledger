@@ -109,15 +109,18 @@ func main() {
 	}
 
 	// 2. 连接业务库 + 初始化表结构（幂等）
-	conn, err := pgx.Connect(ctx, cfg.Database.connString())
+	rawConn, err := pgx.Connect(ctx, cfg.Database.connString())
 	if err != nil {
 		log.Fatalf("连接数据库 %s 失败: %v", cfg.Database.DBName, err)
 	}
-	defer db.Close("main", ctx, conn)
-	if err := db.EnsureSchema(ctx, conn); err != nil {
+	defer db.Close("main", ctx, rawConn)
+	if err := db.EnsureSchema(ctx, rawConn); err != nil {
 		log.Fatalf("表结构初始化失败: %v", err)
 	}
 	logx.New("main").Info("database.ready", "dbname", cfg.Database.DBName)
+
+	// pgx.Conn 不支持并发：包一层互斥，多个请求排队用同一条连接（详见 internal/db/conn.go）
+	conn := db.Wrap(rawConn)
 
 	// 3. 挂路由
 	store := registry.NewStore(conn)
