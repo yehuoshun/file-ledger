@@ -88,6 +88,7 @@
 import { ref, computed, watch } from 'vue'
 import { Back, Refresh } from '@element-plus/icons-vue'
 import { listDir, type FsEntry, type FsListing } from '../api'
+import { normPath, joinPath, parentOf } from '../utils/paths'
 
 const props = defineProps<{ modelValue: boolean; path: string }>()
 const emit = defineEmits<{ 'update:modelValue': [v: boolean] }>()
@@ -113,26 +114,6 @@ const fromFilePath = computed(() => {
 
 // 上级：正常用后端给的 parent；出错时按路径自己算（否则错误状态下无法返回）
 const upTarget = computed(() => (listing.value ? listing.value.parent : parentOf(attemptedPath.value)))
-
-// ── 路径工具（Windows 盘符路径）──
-function normPath(p: string) {
-  return (p || '').replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase()
-}
-
-function joinPath(base: string, name: string) {
-  if (!base) return name
-  return base.endsWith('\\') ? base + name : base + '\\' + name
-}
-
-function parentOf(p: string): string {
-  const s = (p || '').replace(/\//g, '\\').replace(/\\+$/, '')
-  if (!s) return ''
-  if (/^[A-Za-z]:$/.test(s)) return '' // 盘符根没有上级
-  const i = s.lastIndexOf('\\')
-  if (i <= 0) return ''
-  const head = s.slice(0, i)
-  return /^[A-Za-z]:$/.test(head) ? head + '\\' : head
-}
 
 interface Crumb {
   label: string
