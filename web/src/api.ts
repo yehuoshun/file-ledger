@@ -130,6 +130,28 @@ export function listDir(path: string): Promise<FsListing> {
   return request<FsListing>(`/api/fs/list?path=${encodeURIComponent(path)}`)
 }
 
+// ── 盘符在线状态（步骤5）：批量查盘符是否可访问 ──
+// 后端 GET /api/fs/status?drives=D:,Z: → {items:[{drive,online,reason?}],total}
+// 只查台账里出现过的盘符（≤26 个/次）；后端未实现时接口报错，前端按「未知」显示，不打扰用户。
+
+export interface DriveStatus {
+  drive: string
+  online: boolean
+  reason?: string
+}
+
+export interface FsStatusPage {
+  items: DriveStatus[]
+  total: number
+}
+
+export function fsStatus(drives: string[]): Promise<FsStatusPage> {
+  const qs = new URLSearchParams()
+  if (drives?.length) qs.set('drives', drives.join(','))
+  const suffix = qs.toString()
+  return request<FsStatusPage>(suffix ? `/api/fs/status?${suffix}` : '/api/fs/status')
+}
+
 // ── 标签字典（标签后端化）──
 // 后端 GET /api/tags 一个接口两种用法，都返回 {items,total}：
 //   分页/搜索：?q=&limit=&offset=（limit 默认 50，最大 200）

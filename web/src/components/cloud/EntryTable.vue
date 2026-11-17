@@ -19,22 +19,52 @@
       <el-table-column label="路径" min-width="320">
         <template #default="{ row }">
           <div class="path-tags">
-            <span v-for="(p, i) in row.paths" :key="i" class="path-item">
-              <el-tag :type="PATH_TYPE_TAG[p.type]" size="small" class="path-tag">
-                {{ PATH_TYPE_LABEL[p.type] }} {{ p.path }}
-              </el-tag>
-              <el-button
-                v-if="canBrowsePath(p.type, p.path)"
-                link
-                type="primary"
-                size="small"
-                :icon="FolderOpened"
-                class="browse-btn"
-                @click.stop="emit('browse', p.path)"
-              >
-                浏览
-              </el-button>
-            </span>
+            <el-tooltip
+              v-for="(p, i) in row.paths"
+              :key="i"
+              :disabled="!isOffline(p)"
+              :content="offlineTip(p)"
+              placement="top"
+            >
+              <span class="path-item">
+                <!-- 路径芯片：点一下就复制（只抛事件，剪贴板由页面处理） -->
+                <el-tag
+                  :type="PATH_TYPE_TAG[p.type]"
+                  size="small"
+                  class="path-tag clickable"
+                  title="点击复制路径"
+                  @click.stop="emit('copy-path', p.path)"
+                >
+                  <span v-if="isOffline(p)" class="drive-dot offline" />
+                  <span v-else-if="isOnline(p)" class="drive-dot online" />
+                  {{ PATH_TYPE_LABEL[p.type] }} {{ p.path }}
+                  <span v-if="isOffline(p)" class="offline-text">离线</span>
+                </el-tag>
+                <el-button
+                  v-if="canBrowsePath(p.type, p.path)"
+                  link
+                  type="primary"
+                  size="small"
+                  :icon="FolderOpened"
+                  class="browse-btn"
+                  @click.stop="emit('browse', p.path)"
+                >
+                  浏览
+                </el-button>
+                <!-- 定位 = 打开所在目录；虚拟路径暂不支持（文件夹双击即进入，不需要） -->
+                <el-button
+                  v-if="canReveal(row, p)"
+                  link
+                  type="primary"
+                  size="small"
+                  :icon="Aim"
+                  class="browse-btn"
+                  @click.stop="emit('reveal', p.path)"
+                >
+                  定位
+                </el-button>
+              </span>
+            </el-tooltip>
             <span v-if="!row.paths?.length" class="muted">--</span>
           </div>
         </template>
@@ -74,11 +104,12 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { FolderOpened } from '@element-plus/icons-vue'
+import { Aim, FolderOpened } from '@element-plus/icons-vue'
 import { PATH_TYPE_LABEL, PATH_TYPE_TAG } from '../../constants/pathTypes'
 import { useTags } from '../../composables/useTags'
-import { canBrowsePath } from '../../utils/paths'
-import type { Entry } from '../../api'
+import { useDriveStatus } from '../../composables/useDriveStatus'
+import { canBrowsePath, driveOf } from '../../utils/paths'
+import type { Entry, Path } from '../../api'
 
 // 台账列表（云盘 = 滚动加载）：只负责展示与抛事件，数据与分页由父级/composable 管
 const props = withDefaults(
@@ -103,6 +134,8 @@ const emit = defineEmits<{
   edit: [Entry]
   delete: [Entry]
   browse: [string]
+  'copy-path': [string]
+  reveal: [string]
   'load-more': []
 }>()
 
@@ -177,6 +210,51 @@ function tagStyle(name: string) {
   const c = colorOf(name)
   return { background: c.bg, color: c.fg }
 }
+
+// ── 盘符在线状态（步骤5）──
+// 只对 local/mount 的盘符绝对路径显示状态点：虚拟路径没有盘符概念。
+// 缓存与批量查询都在 composables/useDriveStatus.ts，这里只读、只抛事件。
+const { onlineOf, infoOf, ensureDrives } = useDriveStatus()
+
+function driveFor(p: Path): string {
+  if (p.type !== 'local' && p.type !== 'mount') return ''
+  return driveOf(p.path)
+}
+
+function isOnline(p: Path): boolean {
+  const d = driveFor(p)
+  return d ? onlineOf(d) === true : false
+}
+
+function isOffline(p: Path): boolean {
+  const d = driveFor(p)
+  return d ? onlineOf(d) === false : false
+}
+
+function offlineTip(p: Path): string {
+  const d = driveFor(p)
+  const s = d ? infoOf(d) : undefined
+  if (!d || !s || s.online) return ''
+  return s.reason ? `盘符 ${d} 离线（${s.reason}）` : `盘符 ${d} 离线`
+}
+
+// 定位按钮：文件条目 + local/mount 盘符路径才有；虚拟路径不显示（暂不支持定位）
+function canReveal(row: Entry, p: Path): boolean {
+  return !row.isDir && !!driveFor(p)
+}
+
+// 列表变化（换文件夹/滚动加载）时，把当前行里出现的盘符按需补一次状态
+watch(
+  () => props.rows,
+  (rows) => {
+    const drives: string[] = []
+    for (const row of rows) {
+      for (const p of row.paths || []) drives.push(driveFor(p))
+    }
+    ensureDrives(drives)
+  },
+  { immediate: true },
+)
 </script>
 
 <style scoped>
@@ -191,7 +269,21 @@ function tagStyle(name: string) {
 .path-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .path-item { display: inline-flex; align-items: center; gap: 2px; }
 .path-tag { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.path-tag.clickable { cursor: pointer; }
+.path-tag.clickable:hover { opacity: 0.85; }
 .browse-btn { padding: 0 2px; }
+/* 盘符在线状态点：绿=在线，红=离线（未知不显示） */
+.drive-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+.drive-dot.online { background: var(--el-color-success); }
+.drive-dot.offline { background: var(--el-color-danger); }
+.offline-text { margin-left: 4px; color: var(--el-color-danger); font-size: 12px; }
 .tag-chip { margin-right: 4px; display: inline-block; }
 .tag-chip.colored { padding: 1px 6px; border-radius: 3px; font-size: 12px; margin-right: 4px; }
 .muted { color: var(--el-text-color-placeholder); font-size: 12px; }

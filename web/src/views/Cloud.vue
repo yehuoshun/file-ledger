@@ -43,6 +43,8 @@
         @edit="openEdit"
         @delete="handleDelete"
         @browse="openBrowser"
+        @copy-path="copyPath"
+        @reveal="revealPath"
       />
     </main>
 
@@ -71,7 +73,8 @@ import EntryDialog from '../components/cloud/EntryDialog.vue'
 import DirBrowser from '../components/DirBrowser.vue'
 import { useEntries } from '../composables/useEntries'
 import { useFolderTree } from '../composables/useFolderTree'
-import { canBrowsePath } from '../utils/paths'
+import { canBrowsePath, driveOf, parentOf } from '../utils/paths'
+import { useDriveStatus } from '../composables/useDriveStatus'
 import type { Entry, EntryForm } from '../api'
 
 // ── 数据与派生（全部逻辑在 composable 里，本组件只做编排）──
@@ -160,7 +163,7 @@ function onRowDblclick(row: Entry) {
     return
   }
   if (row.paths?.length) {
-    ElMessage.info('虚拟路径暂不支持双击打开，步骤 5 会做成复制路径 / 跳转链接')
+    ElMessage.info('虚拟路径暂不支持双击打开，可点路径芯片复制')
   } else {
     ElMessage.warning('这条没有路径，无法打开')
   }
@@ -221,9 +224,57 @@ async function handleDelete(row: Entry) {
 const browserVisible = ref(false)
 const browserPath = ref('')
 
+// 盘符在线状态（只读缓存，用于「盘符离线，无法定位」的提示）
+const { onlineOf } = useDriveStatus()
+
 function openBrowser(path: string) {
   browserPath.value = path
   browserVisible.value = true
+}
+
+// ── 步骤5：路径复制 / 定位 ──
+// 复制：优先 Clipboard API（127.0.0.1 属安全上下文），失败降级 textarea + execCommand。
+// 剪贴板这类浏览器副作用留在页面，表格组件只抛 copy-path 事件。
+async function writeClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch {
+    // 无权限 / 非安全上下文：落到下面的降级方案
+  }
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.setAttribute('readonly', '')
+    ta.style.position = 'fixed'
+    ta.style.top = '-1000px'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    return ok
+  } catch {
+    return false
+  }
+}
+
+async function copyPath(path: string) {
+  const text = (path || '').trim()
+  if (!text) return
+  if (await writeClipboard(text)) ElMessage.success('已复制路径')
+  else ElMessage.warning('复制失败，请手动选择路径复制')
+}
+
+// 定位：打开文件所在目录（盘符离线也照开，DirBrowser 自己会显示后端返回的错误文案）
+function revealPath(path: string) {
+  const p = (path || '').trim()
+  if (!p) return
+  const drive = driveOf(p)
+  if (drive && onlineOf(drive) === false) ElMessage.warning('盘符离线，无法定位')
+  openBrowser(parentOf(p))
 }
 </script>
 

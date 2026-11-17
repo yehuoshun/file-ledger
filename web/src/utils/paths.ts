@@ -6,6 +6,13 @@ export function canBrowsePath(type: string, path: string): boolean {
   return type !== 'virtual' && /^[A-Za-z]:[\\/]/.test(v)
 }
 
+// 盘符绝对路径 → 盘符（大写，形如 "D:"）；虚拟路径 / 相对路径 / 空串 → ""
+// 注意 D:foo 这种「盘符相对路径」不算绝对路径，必须带分隔符才算
+export function driveOf(path: string): string {
+  const m = /^([A-Za-z]):[\\/]/.exec((path || '').trim())
+  return m ? m[1].toUpperCase() + ':' : ''
+}
+
 export function normPath(p: string): string {
   return (p || '').replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase()
 }
