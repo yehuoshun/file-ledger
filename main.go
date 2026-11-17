@@ -122,6 +122,7 @@ func main() {
 	store := registry.NewStore(conn)
 	mux := http.NewServeMux()
 	api.RegisterRegistryRoutes(mux, store)
+	api.RegisterFSRoutes(mux) // 步骤4 目录浏览（只读）
 	mux.Handle("/", SPAHandler())
 
 	// 请求日志中间件（只记 /api/*）
