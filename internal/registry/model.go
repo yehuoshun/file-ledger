@@ -32,6 +32,14 @@ type Entry struct {
 	UpdatedAt string   `json:"updatedAt,omitempty"`
 }
 
+// FolderRef 文件夹轻量引用：前端建树/面包屑/子条目计数只用到 id、别名、父级，
+// 不带 paths/tags 等大字段，因此单独一条查询。parentId 恒存在（顶层为 null）。
+type FolderRef struct {
+	ID       string  `json:"id"`
+	Alias    string  `json:"alias"`
+	ParentID *string `json:"parentId"`
+}
+
 // 错误定义
 var (
 	ErrNotFound   = errors.New("条目不存在")

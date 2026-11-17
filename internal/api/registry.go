@@ -6,14 +6,25 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 
 	"file-ledger/internal/logx"
 	"file-ledger/internal/registry"
 )
 
+// 台账列表参数：GET /api/registry 一页最多 200 条（与 tags 的分页口径一致）
+const (
+	defaultEntryLimit = 50
+	maxEntryLimit     = 200
+)
+
 // RegistryStore 台账存储接口（api 依赖接口，便于单元测试 mock）
 type RegistryStore interface {
 	List(ctx context.Context) ([]registry.Entry, error)
+	ListPaged(ctx context.Context, params registry.ListParams) ([]registry.Entry, int, error)
+	ListFolders(ctx context.Context) ([]registry.FolderRef, error)
 	Create(ctx context.Context, e *registry.Entry) (*registry.Entry, error)
 	Update(ctx context.Context, id string, e *registry.Entry) (*registry.Entry, error)
 	Delete(ctx context.Context, id string) error
@@ -24,16 +35,57 @@ type TagRegistrar interface {
 	Ensure(ctx context.Context, names []string) error
 }
 
+// entryList 台账列表响应：items 为当页数据，total 为匹配总数（前端据此判断是否还有更多）
+type entryList struct {
+	Items []registry.Entry `json:"items"`
+	Total int              `json:"total"`
+}
+
+// folderList 文件夹轻量列表响应：items 只带 id/alias/parentId，total 为文件夹总数
+type folderList struct {
+	Items []registry.FolderRef `json:"items"`
+	Total int                  `json:"total"`
+}
+
 // RegisterRegistryRoutes 挂载台账 CRUD 路由（Go 1.22+ 方法+路径模式）；
 // tags 非 nil 时，POST/PUT 会先把条目标签登记进字典，再落库。
 func RegisterRegistryRoutes(mux *http.ServeMux, store RegistryStore, tags TagRegistrar) {
+	// GET /api/registry：分页 + 搜索（云盘列表滚动加载）
+	//   ?parent_id=<uuid> 缺省/空 = 顶层（parent_id IS NULL）；给 uuid = 该文件夹的直接子条目
+	//                     （uuid 不存在不报错，返回空 items、total=0）
+	//   ?q=<alias / note / tags 任一包含匹配，大小写不敏感，% _ \ 按字面>
+	//   ?is_dir=true|false（缺省不过滤；其他值 400）
+	//   ?limit=<默认 50，最大 200>&offset=<默认 0>
+	// 响应恒为 {"items":[...],"total":N}（旧的全量 []Entry 形状已废弃）
 	mux.HandleFunc("GET /api/registry", func(w http.ResponseWriter, r *http.Request) {
-		items, err := store.List(r.Context())
+		params, ok := parseEntryListParams(w, r)
+		if !ok {
+			return
+		}
+		items, total, err := store.ListPaged(r.Context(), params)
 		if err != nil {
 			writeError(w, r, http.StatusInternalServerError, "查询台账失败", err)
 			return
 		}
-		writeJSON(w, http.StatusOK, items)
+		if items == nil {
+			items = []registry.Entry{}
+		}
+		writeJSON(w, http.StatusOK, entryList{Items: items, Total: total})
+	})
+
+	// GET /api/registry/folders：全部文件夹的轻量列表（前端建树/面包屑/子条目计数）
+	// 只含 is_dir=true 的条目，扁平按 alias 升序；
+	// 与 PUT/DELETE /api/registry/{id} 是不同方法+不同路径，路由不冲突
+	mux.HandleFunc("GET /api/registry/folders", func(w http.ResponseWriter, r *http.Request) {
+		items, err := store.ListFolders(r.Context())
+		if err != nil {
+			writeError(w, r, http.StatusInternalServerError, "查询文件夹列表失败", err)
+			return
+		}
+		if items == nil {
+			items = []registry.FolderRef{}
+		}
+		writeJSON(w, http.StatusOK, folderList{Items: items, Total: len(items)})
 	})
 
 	mux.HandleFunc("POST /api/registry", func(w http.ResponseWriter, r *http.Request) {
@@ -86,6 +138,69 @@ func RegisterRegistryRoutes(mux *http.ServeMux, store RegistryStore, tags TagReg
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+}
+
+// parseEntryListParams 解析台账列表查询参数；参数不合法时已写好 400 响应。
+// q/parent_id 做 trim，空串按「未传」处理（空 parent_id 与缺省同义：查顶层）。
+func parseEntryListParams(w http.ResponseWriter, r *http.Request) (registry.ListParams, bool) {
+	query := r.URL.Query()
+
+	limit, offset, ok := parseEntryPage(w, r, query)
+	if !ok {
+		return registry.ListParams{}, false
+	}
+	params := registry.ListParams{
+		Q:      strings.TrimSpace(query.Get("q")),
+		Limit:  limit,
+		Offset: offset,
+	}
+
+	if raw := strings.TrimSpace(query.Get("parent_id")); raw != "" {
+		parentID := raw
+		params.ParentID = &parentID
+	}
+
+	if raw := strings.TrimSpace(query.Get("is_dir")); raw != "" {
+		switch raw {
+		case "true":
+			isDir := true
+			params.IsDir = &isDir
+		case "false":
+			isDir := false
+			params.IsDir = &isDir
+		default:
+			writeError(w, r, http.StatusBadRequest, "is_dir 参数不合法（仅支持 true/false）", nil)
+			return registry.ListParams{}, false
+		}
+	}
+	return params, true
+}
+
+// parseEntryPage 解析 limit/offset（空值走默认）；不合法时已写好 400 响应。
+// 口径与 tags 的 parseTagPage 一致：limit ∈ [1,200]，offset ≥ 0。
+func parseEntryPage(w http.ResponseWriter, r *http.Request, query url.Values) (int, int, bool) {
+	limit, offset := defaultEntryLimit, 0
+	if raw := strings.TrimSpace(query.Get("limit")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			writeError(w, r, http.StatusBadRequest, "分页参数不合法", err)
+			return 0, 0, false
+		}
+		limit = n
+	}
+	if raw := strings.TrimSpace(query.Get("offset")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			writeError(w, r, http.StatusBadRequest, "分页参数不合法", err)
+			return 0, 0, false
+		}
+		offset = n
+	}
+	if limit <= 0 || limit > maxEntryLimit || offset < 0 {
+		writeError(w, r, http.StatusBadRequest, "分页参数不合法", nil)
+		return 0, 0, false
+	}
+	return limit, offset, true
 }
 
 // ensureTags 保存条目之前把标签登记进字典（tags 为 nil 表示不登记，旧调用照常编译）

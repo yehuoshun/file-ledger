@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -179,4 +180,138 @@ func translateErr(err error) error {
 		return ErrAliasTaken
 	}
 	return err
+}
+
+// ListParams 台账分页查询参数（api 层解析后传入；limit/offset 的合法性由 api 层校验）
+//   - ParentID：nil 或空串 = 顶层（parent_id IS NULL）；非空 = 该文件夹的直接子条目
+//   - Q：空 = 不过滤；非空 = alias 或 note 包含匹配（大小写不敏感，通配符按字面）
+//   - IsDir：nil = 不过滤；非 nil = 只看文件夹/只看文件
+type ListParams struct {
+	ParentID *string
+	Q        string
+	IsDir    *bool
+	Limit    int
+	Offset   int
+}
+
+// likeEscaper 转义 LIKE/ILIKE 通配符（PG 默认转义符是反斜杠），让用户输入的百分号/下划线/反斜杠按字面匹配。
+// 与 internal/tag 的同名逻辑各自维护一份：registry 不依赖 tag 包。
+var likeEscaper = strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`)
+
+// escapeLike 把搜索词里的 LIKE 通配符转义成字面量
+func escapeLike(q string) string { return likeEscaper.Replace(q) }
+
+// isUUIDText 粗校验 UUID 文本（8-4-4-4-12 带连字符，或 32 位无连字符的十六进制）。
+// parent_id 是非空但格式非法的字符串时按「查不到」处理，不把它送进 SQL 触发 22P02 变 500。
+func isUUIDText(s string) bool {
+	hexOnly := func(c byte) bool {
+		return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
+	}
+	switch len(s) {
+	case 36:
+		for i := 0; i < len(s); i++ {
+			switch i {
+			case 8, 13, 18, 23:
+				if s[i] != '-' {
+					return false
+				}
+			default:
+				if !hexOnly(s[i]) {
+					return false
+				}
+			}
+		}
+		return true
+	case 32:
+		for i := 0; i < len(s); i++ {
+			if !hexOnly(s[i]) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+// ListPaged 按父级/关键字/类型分页查询台账，返回当页数据与匹配总数。
+// 排序：文件夹优先，随后 alias 升序（alias 有唯一约束，分页顺序稳定）。
+// parent_id 不是合法 UUID 时不报错，直接返回空页（前端传脏值应表现为「查不到」）。
+func (s *Store) ListPaged(ctx context.Context, p ListParams) ([]Entry, int, error) {
+	where := make([]string, 0, 3)
+	args := make([]any, 0, 5)
+
+	if p.ParentID == nil || *p.ParentID == "" {
+		where = append(where, "parent_id IS NULL")
+	} else {
+		if !isUUIDText(*p.ParentID) {
+			return []Entry{}, 0, nil
+		}
+		args = append(args, *p.ParentID)
+		where = append(where, fmt.Sprintf("parent_id = $%d", len(args)))
+	}
+	if q := strings.TrimSpace(p.Q); q != "" {
+		args = append(args, escapeLike(q))
+		n := len(args)
+		// alias / note / tags（jsonb 数组任一元素）任一包含即命中，保留改造前「名字/描述/标签都能搜」的能力；
+		// 三处转义符统一是反斜杠（PG LIKE 默认值，这里写显式 ESCAPE 以便阅读）
+		where = append(where, fmt.Sprintf(
+			"(alias ILIKE '%%'||$%d||'%%' OR note ILIKE '%%'||$%d||'%%'"+
+				" OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(tags, '[]'::jsonb)) AS t"+
+				" WHERE t ILIKE '%%'||$%d||'%%' ESCAPE '\\'))", n, n, n))
+	}
+	if p.IsDir != nil {
+		args = append(args, *p.IsDir)
+		where = append(where, fmt.Sprintf("is_dir = $%d", len(args)))
+	}
+	clause := " WHERE " + strings.Join(where, " AND ")
+
+	var total int
+	if err := s.conn.QueryRow(ctx, "SELECT count(*) FROM registry"+clause, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("统计台账数失败: %w", err)
+	}
+
+	pageArgs := append(append([]any{}, args...), p.Limit, p.Offset)
+	rows, err := s.conn.Query(ctx,
+		"SELECT "+entryCols+" FROM registry"+clause+
+			fmt.Sprintf(" ORDER BY is_dir DESC, alias LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2),
+		pageArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("查询台账失败: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]Entry, 0)
+	for rows.Next() {
+		e, err := scanEntry(rows)
+		if err != nil {
+			return nil, 0, fmt.Errorf("扫描台账失败: %w", err)
+		}
+		out = append(out, *e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
+}
+
+// ListFolders 全部文件夹的轻量列表（只有 id/alias/parentId），扁平按 alias 升序；
+// 供前端建树、面包屑与子条目计数，避免为了拿层级把全部条目连同 paths/tags 一起拉下来。
+func (s *Store) ListFolders(ctx context.Context) ([]FolderRef, error) {
+	rows, err := s.conn.Query(ctx,
+		"SELECT id, alias, parent_id FROM registry WHERE is_dir ORDER BY alias")
+	if err != nil {
+		return nil, fmt.Errorf("查询文件夹列表失败: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]FolderRef, 0)
+	for rows.Next() {
+		var f FolderRef
+		if err := rows.Scan(&f.ID, &f.Alias, &f.ParentID); err != nil {
+			return nil, fmt.Errorf("扫描文件夹列表失败: %w", err)
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
 }
