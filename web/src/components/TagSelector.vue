@@ -5,7 +5,7 @@
         v-for="t in tags"
         :key="t"
         class="tag-chip"
-        :style="{ background: getTagColor(t).bg, color: getTagColor(t).text }"
+        :style="{ background: colorOf(t).bg, color: colorOf(t).fg }"
       >
         {{ t }}
         <span class="tag-remove" @click.stop="remove(t)">×</span>
@@ -33,7 +33,7 @@
         :class="{ selected: tags.includes(t) }"
         @click="toggle(t)"
       >
-        <span class="tag-dot" :style="{ background: getTagColor(t).bg }"></span>
+        <span class="tag-dot" :style="{ background: colorOf(t).bg }"></span>
         {{ t }}
         <span v-if="tags.includes(t)" class="check">✓</span>
       </div>
@@ -44,10 +44,13 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import { tagPool, getTagColor } from '../constants/tags'
+import { useTags } from '../composables/useTags'
 
+// 标签选择器：候选池与颜色都来自后端标签字典（composable 单例），组件自己不发请求
 const props = defineProps<{ modelValue: string[] }>()
 const emit = defineEmits<{ 'update:modelValue': [v: string[]] }>()
+
+const { tagNames, colorOf, addTag, reload: reloadTags } = useTags()
 
 const tags = computed(() => props.modelValue || [])
 const open = ref(false)
@@ -55,9 +58,9 @@ const q = ref('')
 const rootRef = ref<HTMLElement | null>(null)
 const inputRef = ref<HTMLInputElement | null>(null)
 
-// 候选 = 共享标签池 + 当前已选（保证已选标签也能在面板里看到并取消）
+// 候选 = 字典里的标签 + 当前已选（保证已选标签也能在面板里看到并取消）
 const allTags = computed(() =>
-  [...new Set([...tagPool.value, ...tags.value])].sort((a, b) => a.localeCompare(b, 'zh')),
+  [...new Set([...tagNames.value, ...tags.value])].sort((a, b) => a.localeCompare(b, 'zh')),
 )
 
 const filteredTags = computed(() => {
@@ -95,14 +98,20 @@ function remove(t: string) {
   }
 }
 
-// 新建标签：进当前条目，同时登记进共享池（下次可直接下拉选）
-function createTag() {
+// 新建标签：先进当前条目（本地立即生效），再 best-effort 登记进后端字典。
+// 409 = 后端已有同名标签，忽略即可；其他失败也只刷新候选池，不打断录入
+// （保存条目时后端会自动补登记，所以这里失败不影响落库）。
+async function createTag() {
   const name = q.value.trim()
   if (!name) return
   if (!tags.value.includes(name)) commit([...tags.value, name])
-  if (!tagPool.value.includes(name)) tagPool.value.push(name)
   q.value = ''
   focusInput()
+  try {
+    await addTag(name)
+  } catch {
+    await reloadTags()
+  }
 }
 
 // 键盘：回车/逗号建标签；空输入退格删最后一个；ESC 收起。
@@ -132,8 +141,11 @@ function focusInput() {
   nextTick(() => inputRef.value?.focus())
 }
 
+// 面板打开时刷新候选池（单例内部会合并并发请求，重开不会堆请求）
 watch(open, (v) => {
-  if (v) focusInput()
+  if (!v) return
+  focusInput()
+  reloadTags()
 })
 
 // 点外部收起（捕获阶段先判，点面板/输入框内不关闭）

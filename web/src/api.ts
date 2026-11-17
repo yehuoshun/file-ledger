@@ -86,3 +86,40 @@ export interface FsListing {
 export function listDir(path: string): Promise<FsListing> {
   return request<FsListing>(`/api/fs/list?path=${encodeURIComponent(path)}`)
 }
+
+// ── 标签字典（标签后端化）──
+// 后端 GET/POST/PUT/DELETE /api/tags；重名 409（{"error":"标签已存在"}）由 request() 抛成 Error。
+// 保存条目时后端会自动把没见过的标签名登记进字典，所以表单里直接填新标签也能落库。
+
+export interface Tag {
+  id: string
+  name: string
+  bg: string
+  fg: string
+  createdAt?: string
+}
+
+// 新增/更新都只传需要改的字段（PUT 是部分更新）
+export interface TagInput {
+  name?: string
+  bg?: string
+  fg?: string
+}
+
+const TAGS_BASE = '/api/tags'
+
+export function listTags(): Promise<Tag[]> {
+  return request<Tag[]>(TAGS_BASE)
+}
+
+export function createTag(input: TagInput & { name: string }): Promise<Tag> {
+  return request<Tag>(TAGS_BASE, { method: 'POST', body: JSON.stringify(input) })
+}
+
+export function updateTag(id: string, input: TagInput): Promise<Tag> {
+  return request<Tag>(`${TAGS_BASE}/${id}`, { method: 'PUT', body: JSON.stringify(input) })
+}
+
+export function deleteTag(id: string): Promise<void> {
+  return request<void>(`${TAGS_BASE}/${id}`, { method: 'DELETE' })
+}

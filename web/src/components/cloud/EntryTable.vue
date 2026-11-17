@@ -47,7 +47,7 @@
 
     <el-table-column label="标签" min-width="140">
       <template #default="{ row }">
-        <span v-for="t in row.tags" :key="t" class="tag-chip colored" :style="getTagColor(t)">{{ t }}</span>
+        <span v-for="t in row.tags" :key="t" class="tag-chip colored" :style="tagStyle(t)">{{ t }}</span>
         <span v-if="!row.tags?.length" class="muted">--</span>
       </template>
     </el-table-column>
@@ -64,9 +64,10 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import { FolderOpened } from '@element-plus/icons-vue'
 import { PATH_TYPE_LABEL, PATH_TYPE_TAG } from '../../constants/pathTypes'
-import { getTagColor } from '../../constants/tags'
+import { useTags } from '../../composables/useTags'
 import { canBrowsePath } from '../../utils/paths'
 import type { Entry } from '../../api'
 
@@ -82,6 +83,18 @@ const emit = defineEmits<{
 
 function onRowDblclick(row: Entry) {
   emit('row-dblclick', row)
+}
+
+// 标签颜色来自后端字典（composable 单例）：表格直接渲染颜色，进页面时若还没拉过就补一次
+const { colorOf, loaded, reload } = useTags()
+
+onMounted(() => {
+  if (!loaded.value) reload()
+})
+
+function tagStyle(name: string) {
+  const c = colorOf(name)
+  return { background: c.bg, color: c.fg }
 }
 </script>
 
