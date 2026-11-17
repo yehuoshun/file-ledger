@@ -62,3 +62,27 @@ export function updateEntry(id: string, form: EntryForm): Promise<Entry> {
 export function deleteEntry(id: string): Promise<void> {
   return request<void>(`${BASE}/${id}`, { method: 'DELETE' })
 }
+
+// ── 本地文件系统浏览（批次步骤4）：只读目录列表 ──
+// 后端 GET /api/fs/list?path=<绝对路径>：path 指目录则列该目录，指文件则自动列其所在目录，
+// 响应里的 path 是实际被列出的目录，parent 是上一级（盘符根的 parent 为空串）。
+
+export interface FsEntry {
+  name: string
+  isDir: boolean
+  size: number
+  modTime: string
+  ext: string
+}
+
+export interface FsListing {
+  path: string
+  parent: string
+  entries: FsEntry[]
+  total: number
+  truncated: boolean
+}
+
+export function listDir(path: string): Promise<FsListing> {
+  return request<FsListing>(`/api/fs/list?path=${encodeURIComponent(path)}`)
+}

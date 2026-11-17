@@ -56,15 +56,22 @@
         <el-table-column label="路径" min-width="320">
           <template #default="{ row }">
             <div class="path-tags">
-              <el-tag
-                v-for="(p, i) in row.paths"
-                :key="i"
-                :type="PATH_TYPE_TAG[p.type]"
-                size="small"
-                class="path-tag"
-              >
-                {{ PATH_TYPE_LABEL[p.type] }} {{ p.path }}
-              </el-tag>
+              <span v-for="(p, i) in row.paths" :key="i" class="path-item">
+                <el-tag :type="PATH_TYPE_TAG[p.type]" size="small" class="path-tag">
+                  {{ PATH_TYPE_LABEL[p.type] }} {{ p.path }}
+                </el-tag>
+                <el-button
+                  v-if="canBrowse(p)"
+                  link
+                  type="primary"
+                  size="small"
+                  :icon="FolderOpened"
+                  class="browse-btn"
+                  @click.stop="openBrowser(p.path)"
+                >
+                  浏览
+                </el-button>
+              </span>
               <span v-if="!row.paths?.length" class="muted">--</span>
             </div>
           </template>
@@ -157,16 +164,21 @@
         <el-button type="primary" @click="handleSave">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 目录浏览器（步骤4）：从台账路径只读浏览本地目录 -->
+    <DirBrowser v-model="browserVisible" :path="browserPath" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { FolderOpened } from '@element-plus/icons-vue'
 import TagSelector from '../components/TagSelector.vue'
+import DirBrowser from '../components/DirBrowser.vue'
 import { getTagColor } from '../constants/tags'
 import { PATH_TYPE_LABEL, PATH_TYPE_TAG, PATH_TYPE_OPTIONS } from '../constants/pathTypes'
-import { listEntries, createEntry, updateEntry, deleteEntry, type Entry, type EntryForm, type PathType } from '../api'
+import { listEntries, createEntry, updateEntry, deleteEntry, type Entry, type EntryForm, type Path, type PathType } from '../api'
 
 // ── 数据（真实 API，全量加载 → 前端组树）──
 const entries = ref<Entry[]>([])
@@ -380,6 +392,21 @@ async function handleDelete(row: Entry) {
     ElMessage.error(e.message || '删除失败')
   }
 }
+
+// ── 目录浏览器（步骤4）：从台账路径只读浏览本地目录 ──
+const browserVisible = ref(false)
+const browserPath = ref('')
+
+// 只有本地/挂载的盘符绝对路径能浏览；虚拟路径（ali:… / https:…）不在本功能范围内
+function canBrowse(p: Path) {
+  const v = (p.path || '').trim()
+  return p.type !== 'virtual' && /^[A-Za-z]:[\\/]/.test(v)
+}
+
+function openBrowser(path: string) {
+  browserPath.value = path
+  browserVisible.value = true
+}
 </script>
 
 <style scoped>
@@ -429,7 +456,9 @@ async function handleDelete(row: Entry) {
 .search-input { width: 180px; }
 .dir-name { font-weight: 500; }
 .path-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.path-item { display: inline-flex; align-items: center; gap: 2px; }
 .path-tag { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browse-btn { padding: 0 2px; }
 .tag-chip { margin-right: 4px; display: inline-block; }
 .tag-chip.colored { padding: 1px 6px; border-radius: 3px; font-size: 12px; margin-right: 4px; }
 .muted { color: var(--el-text-color-placeholder); font-size: 12px; }
